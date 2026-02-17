@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bookchiki
+      POSTGRES_PASSWORD: bookchiki
+      POSTGRES_DB: bookchiki
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookchiki"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - osdata:/usr/share/opensearch/data
+
+volumes:
+  pgdata:
+  osdata:
