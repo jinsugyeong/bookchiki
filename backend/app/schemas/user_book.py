@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -11,12 +11,16 @@ class UserBookCreate(BaseModel):
     status: str = "wishlist"  # reading / read / wishlist
     rating: int | None = Field(None, ge=1, le=5)
     memo: str | None = None
+    started_at: date | None = None
+    finished_at: date | None = None
 
 
 class UserBookUpdate(BaseModel):
     status: str | None = None
     rating: int | None = Field(None, ge=1, le=5)
     memo: str | None = None
+    started_at: date | None = None
+    finished_at: date | None = None
 
 
 class UserBookResponse(BaseModel):
@@ -26,6 +30,8 @@ class UserBookResponse(BaseModel):
     status: str
     rating: int | None = None
     memo: str | None = None
+    started_at: date | None = None
+    finished_at: date | None = None
     source: str
     created_at: datetime
     book: BookResponse | None = None

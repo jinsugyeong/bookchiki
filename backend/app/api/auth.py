@@ -13,11 +13,6 @@ from app.api.deps import get_current_user
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-class GoogleTokenRequest:
-    def __init__(self, code: str):
-        self.code = code
-
-
 @router.post("/google", response_model=TokenResponse)
 async def google_login(code: str, db: AsyncSession = Depends(get_db)):
     """Exchange Google OAuth authorization code for access token."""

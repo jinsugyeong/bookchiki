@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.book import Book
 from app.models.user_book import UserBook
 from app.schemas.user_book import UserBookCreate, UserBookUpdate, UserBookResponse, ReadingStats
+from app.services.recommend import invalidate_cache
 
 router = APIRouter(prefix="/my-books", tags=["my-books"])
 
@@ -40,11 +41,12 @@ async def get_reading_stats(
     genres = [ub.book.genre for ub in user_books if ub.book and ub.book.genre]
     genre_dist = dict(Counter(genres))
 
-    # Monthly counts (based on created_at)
+    # Monthly counts (based on finished_at, fallback to created_at)
     monthly = Counter()
     for ub in user_books:
         if ub.status == "read":
-            key = ub.created_at.strftime("%Y-%m")
+            dt = ub.finished_at or ub.created_at
+            key = dt.strftime("%Y-%m") if hasattr(dt, 'strftime') else str(dt)[:7]
             monthly[key] += 1
 
     return ReadingStats(
@@ -97,8 +99,12 @@ async def add_book(
     user_book = UserBook(user_id=current_user.id, **user_book_in.model_dump())
     db.add(user_book)
     await db.commit()
-    await db.refresh(user_book)
-    return user_book
+
+    # Re-fetch with book relationship loaded
+    result = await db.execute(
+        select(UserBook).options(joinedload(UserBook.book)).where(UserBook.id == user_book.id)
+    )
+    return result.unique().scalar_one()
 
 
 @router.patch("/{user_book_id}", response_model=UserBookResponse)
@@ -117,12 +123,22 @@ async def update_my_book(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found in your library")
 
     update_data = update.model_dump(exclude_unset=True)
+    rating_changed = "rating" in update_data and update_data["rating"] != user_book.rating
+
     for field, value in update_data.items():
         setattr(user_book, field, value)
 
     await db.commit()
-    await db.refresh(user_book)
-    return user_book
+
+    # Invalidate recommendation cache when rating changes
+    if rating_changed:
+        invalidate_cache(current_user.id)
+
+    # Re-fetch with book relationship loaded
+    result = await db.execute(
+        select(UserBook).options(joinedload(UserBook.book)).where(UserBook.id == user_book_id)
+    )
+    return result.unique().scalar_one()
 
 
 @router.delete("/{user_book_id}", status_code=status.HTTP_204_NO_CONTENT)

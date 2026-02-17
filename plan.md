@@ -112,14 +112,14 @@ recommendations
 - [x] 독서 통계 집계 API (월별 독서량, 장르 분포, 평균 별점) + 라우트 버그 픽스
 
 ### Phase 3 — OpenSearch + AI 추천 (메인 기능 2) (2주차 후반 ~ 3주차)
-- [ ] AWS OpenSearch 클러스터 생성 (개발 중엔 로컬 Docker)
-- [ ] 책 인덱스 매핑 설계 (키워드 필드 + 벡터 필드)
-- [ ] 책 설명 임베딩 생성 후 OpenSearch 인덱싱
-- [ ] 별점 가중치 반영 취향 벡터 계산 로직
-- [ ] OpenSearch KNN으로 유사 도서 탐색 API
-- [ ] OpenAI(GPT-4o-mini) API 연동 → 추천 이유 코멘트 생성
-- [ ] 자연어 책 검색 (하이브리드 검색: 키워드 + KNN)
-- [ ] 추천 캐싱 전략 (별점 변경 시 캐시 무효화)
+- [x] AWS OpenSearch 클러스터 생성 (개발 중엔 로컬 Docker)
+- [x] 책 인덱스 매핑 설계 (키워드 필드 + 벡터 필드)
+- [x] 책 설명 임베딩 생성 후 OpenSearch 인덱싱
+- [x] 별점 가중치 반영 취향 벡터 계산 로직
+- [x] OpenSearch KNN으로 유사 도서 탐색 API
+- [x] OpenAI(GPT-4o-mini) API 연동 → 추천 이유 코멘트 생성
+- [x] 자연어 책 검색 (하이브리드 검색: 키워드 + KNN)
+- [x] 추천 캐싱 전략 (별점 변경 시 캐시 무효화)
 
 ### Phase 4 — 이미지 생성 (부가 기능) (3주차 후반)
 - [ ] AI Agent Tool 정의
