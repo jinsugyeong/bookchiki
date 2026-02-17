@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import String, SmallInteger, Text, DateTime, ForeignKey, func, UniqueConstraint
+from sqlalchemy import String, SmallInteger, Text, Date, DateTime, ForeignKey, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,8 +18,11 @@ class UserBook(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="wishlist")  # reading / read / wishlist
     rating: Mapped[int | None] = mapped_column(SmallInteger)  # 1~5
     memo: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[date | None] = mapped_column(Date)  # 읽기 시작한 날짜
+    finished_at: Mapped[date | None] = mapped_column(Date)  # 다 읽은 날짜
     source: Mapped[str] = mapped_column(String(20), default="manual")  # manual / import
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="user_books")
     book: Mapped["Book"] = relationship(back_populates="user_books")
+    highlights: Mapped[list["Highlight"]] = relationship(back_populates="user_book", cascade="all, delete-orphan")

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 
 class HighlightCreate(BaseModel):
-    book_id: uuid.UUID
+    user_book_id: uuid.UUID
     content: str
     page_number: int | None = None
     note: str | None = None
@@ -21,8 +21,7 @@ class HighlightUpdate(BaseModel):
 
 class HighlightResponse(BaseModel):
     id: uuid.UUID
-    user_id: uuid.UUID
-    book_id: uuid.UUID
+    user_book_id: uuid.UUID
     content: str
     page_number: int | None = None
     note: str | None = None

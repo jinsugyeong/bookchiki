@@ -10,6 +10,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      opensearch:
+        condition: service_healthy
     volumes:
       - ./backend:/app
 
@@ -30,15 +32,22 @@ services:
       retries: 5
 
   opensearch:
-    image: opensearchproject/opensearch:2.17.1
+    build: ./opensearch
     environment:
       - discovery.type=single-node
       - plugins.security.disabled=true
       - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=B@0kchiki
     ports:
       - "9200:9200"
     volumes:
       - osdata:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 volumes:
   pgdata:

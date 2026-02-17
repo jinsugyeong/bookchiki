@@ -21,4 +21,3 @@ class User(Base):
     generated_images: Mapped[list["GeneratedImage"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     book_imports: Mapped[list["BookImport"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     recommendations: Mapped[list["Recommendation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    highlights: Mapped[list["Highlight"]] = relationship(back_populates="user", cascade="all, delete-orphan")

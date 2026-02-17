@@ -27,5 +27,9 @@ out/
 pgdata/
 osdata/
 
-
+# Claude
 .claude
+CLAUDE.md
+
+# data
+*.csv

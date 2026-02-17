@@ -10,6 +10,7 @@ from app.models.user import User
 from app.models.book import Book
 from app.schemas.book import BookCreate, BookResponse, BookSearchResult
 from app.services.aladin import search_books as aladin_search
+from app.services.rag import index_book
 
 router = APIRouter(prefix="/books", tags=["books"])
 
@@ -53,17 +54,24 @@ async def select_aladin_book(
             return found
 
     book = Book(
-        title=book_data.title,
-        author=book_data.author,
+        title=(book_data.title or "")[:500],
+        author=(book_data.author or "")[:1000],
         isbn=book_data.isbn,
         description=book_data.description,
-        cover_image_url=book_data.cover_image_url,
-        genre=book_data.genre,
+        cover_image_url=(book_data.cover_image_url or "")[:500],
+        genre=(book_data.genre or "")[:500],
         published_at=book_data.published_at,
     )
     db.add(book)
     await db.commit()
     await db.refresh(book)
+
+    # Index in OpenSearch (background, don't fail the request)
+    try:
+        await index_book(book)
+    except Exception:
+        pass
+
     return book
 
 
@@ -94,4 +102,10 @@ async def create_book(
     db.add(book)
     await db.commit()
     await db.refresh(book)
+
+    try:
+        await index_book(book)
+    except Exception:
+        pass
+
     return book

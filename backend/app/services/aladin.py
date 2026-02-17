@@ -19,6 +19,7 @@ async def search_books(query: str, max_results: int = 20) -> list[BookSearchResu
         "SearchTarget": "Book",
         "output": "js",
         "Version": "20131101",
+        "Cover": "Big",
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
