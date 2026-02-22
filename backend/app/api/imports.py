@@ -6,6 +6,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.schemas.book_import import ImportResult
 from app.services.book_import import import_csv
+from app.services.profile_cache import mark_profile_dirty
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
@@ -28,5 +29,8 @@ async def upload_csv(
         result = await import_csv(content, current_user.id, db)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to parse CSV: {e}")
+
+    # CSV 임포트 후 추천 캐시 dirty 마킹
+    await mark_profile_dirty(db, current_user.id, reason="csv_imported")
 
     return result

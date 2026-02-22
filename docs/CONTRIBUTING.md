@@ -211,8 +211,8 @@ backend/
 │   └── __init__.py
 ├── requirements.txt      # Python 의존성
 ├── Dockerfile
-├── .env.example          # 환경변수 템플릿
-└── reset_db.py           # DB 초기화 스크립트
+└── .env.example          # 환경변수 템플릿
+
 ```
 
 ---
@@ -255,8 +255,6 @@ elasticsearch.exceptions.TransportError: Connection refused
 프로젝트 규칙:
 - **코드:** 영어 (변수명, 함수명, 주석)
 - **문서 / 로그:** 한국어
-- **함수:** 50줄 이하
-- **파일:** 800줄 이하
 - **불변성:** 객체 변경 금지 (새 복사본 생성)
 - **에러 처리:** 모든 레벨에서 명시적 처리
 

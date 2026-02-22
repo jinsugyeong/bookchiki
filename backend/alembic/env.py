@@ -2,11 +2,12 @@ import asyncio
 from logging.config import fileConfig
 
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 from alembic import context
 
+from app.core.config import settings
 from app.core.database import Base
-from app.models import *  # noqa: F401, F403 — import all models for autogenerate
+from app.models import *  # noqa: F401, F403 — autogenerate용 모든 모델 임포트
 
 config = context.config
 if config.config_file_name is not None:
@@ -16,7 +17,8 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    """오프라인 모드: alembic.ini의 url 사용."""
+    url = settings.DATABASE_URL
     context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
     with context.begin_transaction():
         context.run_migrations()
@@ -29,11 +31,8 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations():
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    """온라인 모드: 환경변수 DATABASE_URL 사용."""
+    connectable = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

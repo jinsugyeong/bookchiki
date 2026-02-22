@@ -13,6 +13,7 @@ from app.models.book import Book
 from app.models.user_book import UserBook
 from app.schemas.user_book import UserBookCreate, UserBookUpdate, UserBookResponse, ReadingStats
 from app.services.recommend import invalidate_cache
+from app.services.profile_cache import mark_profile_dirty
 
 router = APIRouter(prefix="/my-books", tags=["my-books"])
 
@@ -100,6 +101,9 @@ async def add_book(
     db.add(user_book)
     await db.commit()
 
+    # 추천 캐시 dirty 마킹
+    await mark_profile_dirty(db, current_user.id, reason="book_added")
+
     # Re-fetch with book relationship loaded
     result = await db.execute(
         select(UserBook).options(joinedload(UserBook.book)).where(UserBook.id == user_book.id)
@@ -130,9 +134,12 @@ async def update_my_book(
 
     await db.commit()
 
-    # Invalidate recommendation cache when rating changes
+    # 인메모리 추천 캐시 무효화 (평점 변경 시)
     if rating_changed:
         invalidate_cache(current_user.id)
+
+    # DB 추천 캐시 dirty 마킹
+    await mark_profile_dirty(db, current_user.id, reason="book_updated")
 
     # Re-fetch with book relationship loaded
     result = await db.execute(
@@ -157,3 +164,6 @@ async def remove_my_book(
 
     await db.delete(user_book)
     await db.commit()
+
+    # 추천 캐시 dirty 마킹
+    await mark_profile_dirty(db, current_user.id, reason="book_deleted")

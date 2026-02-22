@@ -157,13 +157,19 @@ Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다
 
 ### "추천 시스템이 어떻게 작동하나요?"
 → 시스템 1 (기록 기반): [CLAUDE.md](../CLAUDE.md) - "추천 파이프라인" 섹션
+
 → 시스템 2 (자연어 질문 기반): [plan.md](./plan.md) - "Phase 3.5 추천 시스템 아키텍처 결정" 섹션
+
 → Phase 4 재설계: [recommendation-profile-cache-design.md](./recommendation-profile-cache-design.md)
 
 ### "자연어 검색과 질문 기반 추천(`/ask`)의 차이는 무엇인가요?"
+
 → 같은 시스템(시스템 2)의 현재 구현체와 발전형입니다.
+
 → 현재 `/search/natural`: 개인화 없이 OpenSearch 하이브리드 검색
+
 → 예정 `/recommendations/ask`: 취향 프로필 컨텍스트 주입 → 개인화 추천
+
 → [API.md](./API.md) - `POST /recommendations/ask` 섹션
 
 ### "추천 캐시가 정확히 어떻게 작동하나요?"
@@ -180,13 +186,7 @@ Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다
 - **마지막 업데이트:** 각 문서 상단의 `마지막 업데이트` 타임스탬프 확인
 - **정보 정확성:** 코드와 문서가 일치하지 않으면 코드가 우선
 
----
 
-## 기여 방법
-
-1. 문서를 읽고 부정확한 부분 발견 → GitHub Issue 등록
-2. 새로운 기능 개발 후 문서 업데이트
-3. 코드 변경 시 관련 문서도 함께 수정
 
 ---
 
