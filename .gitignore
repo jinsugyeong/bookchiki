@@ -33,3 +33,9 @@ CLAUDE.md
 
 # data
 *.csv
+/output
+/backups
+
+# test용
+*.ipynb
+requirements.txt

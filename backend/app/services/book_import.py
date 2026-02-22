@@ -11,7 +11,6 @@ from app.models.user_book import UserBook
 from app.models.book_import import BookImport
 from app.schemas.book_import import ImportResult
 from app.services.aladin import search_books as aladin_search
-from app.services.rag import index_book
 
 logger = logging.getLogger(__name__)
 
@@ -214,12 +213,6 @@ async def import_csv(
             else:
                 db.add(book)
                 await db.flush()
-
-            # Index in OpenSearch for recommendations/search
-            try:
-                await index_book(book)
-            except Exception:
-                logger.warning("Failed to index imported book '%s' in OpenSearch", title)
 
         # Check if user already has this book
         existing_ub = await db.execute(

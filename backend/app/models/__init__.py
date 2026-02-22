@@ -6,6 +6,7 @@ from app.models.image_version import ImageVersion
 from app.models.book_import import BookImport
 from app.models.recommendation import Recommendation
 from app.models.highlight import Highlight
+from app.models.user_preference_profile import UserPreferenceProfile
 
 __all__ = [
     "User",
@@ -16,4 +17,5 @@ __all__ = [
     "BookImport",
     "Recommendation",
     "Highlight",
+    "UserPreferenceProfile",
 ]
