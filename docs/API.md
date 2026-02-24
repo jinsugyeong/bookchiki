@@ -1,6 +1,6 @@
 # API 엔드포인트 레퍼런스
 
-마지막 업데이트: 2026-02-22 (Phase 4 자연어 검색 및 books 인덱싱 제거 완료)
+마지막 업데이트: 2026-02-25 (Phase 4 추천 시스템 재설계 — OpenSearch 하이브리드 검색 기반으로 전환)
 
 이 문서는 Bookchiki 백엔드의 모든 API 엔드포인트를 설명합니다.
 
@@ -473,22 +473,24 @@ GET /recommendations?limit=10
 **동작:**
 1. `user_preference_profiles`에서 `is_dirty` 플래그 확인
    - `is_dirty=false` → `recommendations` 테이블 직접 SELECT (캐시 히트, ~10ms)
-   - `is_dirty=true` → 전체 파이프라인 실행 (캐시 미스, 30~60초)
-2. 사용자 라이브러리 + 메모 분석 → 취향 프로필 생성 (LLM)
-3. 취향 벡터 계산 (OpenAI embed)
-4. GPT-4o-mini로 책 후보 생성
-5. 알라딘 API로 실존 검증
-6. 취향 벡터로 재랭킹
-7. 최종 N권만 DB + OpenSearch 저장
-8. `user_preference_profiles` 갱신 (`is_dirty=false`, `profile_data`, `preference_vector`)
+   - `is_dirty=true` → 전체 파이프라인 실행 (캐시 미스)
+2. 취향 벡터 계산:
+   - `books` OpenSearch 인덱스에서 평점 있는 책 임베딩 조회
+   - `user_memos` OpenSearch 인덱스에서 유저 메모 임베딩 조회
+   - `α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩` (α=0.6)
+3. 선호 장르 키워드 추출
+4. `books` OpenSearch 인덱스 하이브리드 검색 (BM25 + k-NN), 서재에 있는 책 제외
+5. 최종 N권 `recommendations` 테이블 저장
+6. `user_preference_profiles` 갱신 (`is_dirty=false`, `profile_data`, `preference_vector`)
+7. GPT-4o-mini로 추천 이유 생성
 
-**주의:** Cold start(평점 없음) 사용자는 별점 가중치 없이 추천됩니다.
+**주의:** Cold start(평점/메모 없음) 사용자는 `books` 인덱스에서 description 기준 폴백 검색으로 추천됩니다.
 
 ---
 
 ### POST `/recommendations/ask` (시스템 2 — 질문 기반 맞춤 추천)
 
-저장된 취향 프로필과 커뮤니티 지식 베이스를 활용하여 자유 질문에 맞는 맞춤 추천을 제공합니다.
+저장된 취향 프로필과 도서 지식 베이스를 활용하여 자유 질문에 맞는 맞춤 추천을 제공합니다.
 
 **요청:**
 
@@ -523,7 +525,7 @@ GET /recommendations?limit=10
 2. `rag_knowledge` 인덱스에서 사용자 질문과 관련된 정보 하이브리드 검색
 3. LLM에 다음을 컨텍스트로 주입:
    - 취향 프로필: `preference_summary`, `preferred_genres`, `disliked_genres`, `top_rated_books`
-   - 검색 결과 (커뮤니티 데이터 청크)
+   - 검색 결과 (지식 베이스 청크)
 4. 사용자 질문 + 취향 프로필 + 검색 결과를 종합하여 맞춤 추천 생성
 5. 캐시 overwrite 없음 (별도 응답)
 
@@ -636,7 +638,7 @@ curl -X POST http://localhost:8000/imports/csv \
 
 ### POST `/admin/seed-community-books`
 
-커뮤니티 데이터 (독서 기록, 추천 정보 등)를 파싱하여 도서 데이터베이스에 시딩합니다.
+외부 도서 데이터를 파싱하여 도서 데이터베이스에 시딩합니다.
 
 **응답 (200):**
 
@@ -651,6 +653,52 @@ curl -X POST http://localhost:8000/imports/csv \
 - 관리자 전용 (차후 권한 검증 추가 예정)
 - 알라딘 API 호출로 비용 발생 (책 실존 검증)
 - 대량 도서 시딩 시 시간이 오래 걸릴 수 있음 (동시 요청 제한: 5개)
+
+---
+
+### POST `/admin/index-books`
+
+DB `books` 테이블의 모든 도서를 OpenSearch `books` 인덱스에 임베딩하여 적재합니다.
+
+**응답 (200):**
+
+```json
+{
+  "total": 500,
+  "indexed": 480,
+  "skipped": 20,
+  "errors": 0
+}
+```
+
+**주의:**
+- 관리자 전용
+- OpenAI API 임베딩 호출로 비용 발생 (책 수에 비례)
+- 이미 인덱싱된 book_id는 스킵 (중복 방지)
+- 실행 전 사용자 확인 필요
+
+---
+
+### POST `/admin/index-memos`
+
+`user_books` 테이블의 모든 메모를 OpenSearch `user_memos` 인덱스에 임베딩하여 적재합니다.
+
+**응답 (200):**
+
+```json
+{
+  "total": 200,
+  "indexed": 195,
+  "skipped": 5,
+  "errors": 0
+}
+```
+
+**주의:**
+- 관리자 전용
+- OpenAI API 임베딩 호출로 비용 발생
+- 메모가 없는 UserBook은 스킵
+- 실행 전 사용자 확인 필요
 
 ---
 

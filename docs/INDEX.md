@@ -1,6 +1,6 @@
 # 문서 인덱스
 
-마지막 업데이트: 2026-02-22 (Phase 4 추천 시스템 재설계 반영)
+마지막 업데이트: 2026-02-25 (Phase 4 추천 시스템 재설계 — OpenSearch 하이브리드 검색 기반 전환)
 
 Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다.
 
@@ -48,10 +48,10 @@ Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다
 - 도서 관리 (조회, 검색, 추가)
 - 내 서재 (통계, 목록, 추가, 수정, 삭제)
 - 하이라이트 & 메모
-- 추천 (캐시, 강제 갱신)
-- 자연어 검색 (하이브리드)
+- 추천 시스템 1 (기록 기반, OpenSearch 하이브리드)
+- 추천 시스템 2 (질문 기반, RAG)
 - CSV 가져오기
-- 관리자 기능 (인덱싱)
+- 관리자 기능 (인덱싱, 시딩)
 - 에러 응답 형식
 
 ---
@@ -105,12 +105,12 @@ Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다
 
 ### 추천 기능 개발 (Phase 4 재설계 진행 중)
 
-1. **[recommendation-profile-cache-design.md](./recommendation-profile-cache-design.md)** — 설계 상세 이해
-2. **[CLAUDE.md](../CLAUDE.md)** — 추천 파이프라인 섹션 정독 (재설계 반영)
-3. **[plan.md](../plan.md)** — Phase 4 구현 태스크 확인
-4. **[API.md](./API.md)** — `/recommendations`, `/recommendations/ask`, `/recommendations/profile`, `/recommendations/refresh` 엔드포인트 확인
-5. 코드: `backend/app/services/recommend.py`, `backend/app/services/profile_cache.py` (신규)
-6. 모델: `backend/app/models/user_preference_profile.py` (신규)
+1. **[recommendation-profile-cache-design.md](./recommendation-profile-cache-design.md)** — 캐시 아키텍처 설계
+2. **[CLAUDE.md](../CLAUDE.md)** — 추천 파이프라인 섹션 정독
+3. **[plan.md](./plan.md)** — Phase 4 구현 태스크 확인
+4. **[API.md](./API.md)** — `/recommendations`, `/recommendations/ask`, `/recommendations/profile`, `/admin/index-books`, `/admin/index-memos` 엔드포인트 확인
+5. 서비스 코드: `recommend.py`, `profile_cache.py`, `book_indexer.py`(신규), `memo_indexer.py`(신규), `book_search.py`(신규)
+6. 모델: `backend/app/models/user_preference_profile.py`
 
 ---
 
@@ -130,7 +130,7 @@ Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다
 | ENV.md | `backend/.env`, `backend/.env.example`, `app/core/config.py` |
 | API.md | `backend/app/api/` (모든 라우터 파일), 특히 `recommendations.py`, `user_books.py`, `imports.py` |
 | CLAUDE.md | 전체 프로젝트 아키텍처 (Phase 4 재설계 반영) |
-| recommendation-profile-cache-design.md | `backend/app/services/recommend.py`, `profile_cache.py` (신규), `backend/app/models/user_preference_profile.py` (신규) |
+| recommendation-profile-cache-design.md | `recommend.py`, `profile_cache.py`, `book_indexer.py`(신규), `memo_indexer.py`(신규), `book_search.py`(신규), `user_preference_profile.py` |
 | plan.md | Phase 4 추천 시스템 재설계 태스크 |
 
 ---
@@ -162,15 +162,13 @@ Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다
 
 → Phase 4 재설계: [recommendation-profile-cache-design.md](./recommendation-profile-cache-design.md)
 
-### "자연어 검색과 질문 기반 추천(`/ask`)의 차이는 무엇인가요?"
+### "추천 시스템 1과 시스템 2의 차이는 무엇인가요?"
 
-→ 같은 시스템(시스템 2)의 현재 구현체와 발전형입니다.
+→ **시스템 1** (`GET /recommendations`): 유저 서재/메모 기반 자동 개인화 추천 (OpenSearch 하이브리드 검색)
 
-→ 현재 `/search/natural`: 개인화 없이 OpenSearch 하이브리드 검색
+→ **시스템 2** (`POST /recommendations/ask`): 유저가 자연어로 직접 질문하면 RAG 기반 맞춤 추천
 
-→ 예정 `/recommendations/ask`: 취향 프로필 컨텍스트 주입 → 개인화 추천
-
-→ [API.md](./API.md) - `POST /recommendations/ask` 섹션
+→ [API.md](./API.md) - 추천 섹션 참고
 
 ### "추천 캐시가 정확히 어떻게 작동하나요?"
 → [recommendation-profile-cache-design.md](./recommendation-profile-cache-design.md) - "5. 추천 흐름 설계" + "6. Dirty 마킹 전략" 섹션

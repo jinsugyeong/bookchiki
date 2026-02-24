@@ -98,7 +98,7 @@ recommendations: id, user_id, book_id, score, reason, created_at
 
 ## 5. 추천 흐름 설계
 
-### 5-1. 기록 기반 추천 (메인 페이지 접속)
+### 5-1. 기록 기반 추천 — 시스템 1 (메인 페이지 접속)
 
 ```
 GET /recommendations
@@ -115,17 +115,20 @@ is_dirty    is_dirty
 recommendations  전체 파이프라인 실행
 테이블 직접 SELECT   │
 (~10ms, API 0회)    ├─ 1. 유저 서재 로드
-        │           ├─ 2. 취향 프로필 생성 (LLM 메모 분석)
-        │           ├─ 3. 취향 벡터 계산 (OpenAI embed)
-        │           ├─ 4. LLM 책 후보 생성
-        │           ├─ 5. 알라딘 실존 검증
-        │           ├─ 6. KNN 재랭킹
-        │           ├─ 7. DB 저장 (books + recommendations)
-        │           ├─ 8. user_preference_profiles 갱신
+        │           ├─ 2. 취향 벡터 계산
+        │           │      - books 인덱스에서 평점 있는 책 임베딩 조회
+        │           │      - user_memos 인덱스에서 메모 임베딩 조회
+        │           │      - α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩
+        │           ├─ 3. 장르 키워드 추출 (선호 장르)
+        │           ├─ 4. OpenSearch books 인덱스 하이브리드 검색
+        │           │      BM25(장르) + k-NN(취향벡터)
+        │           │      이미 서재에 있는 책 제외
+        │           ├─ 5. DB 저장 (recommendations)
+        │           ├─ 6. user_preference_profiles 갱신
         │           │      is_dirty = false
         │           │      profile_data = {...}
         │           │      version += 1
-        │           └─ 9. 추천 결과 반환
+        │           └─ 7. LLM으로 추천 이유 생성 + 응답
         │
         ▼
       응답
