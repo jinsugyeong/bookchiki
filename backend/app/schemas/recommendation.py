@@ -69,3 +69,10 @@ class SeedStatusResponse(BaseModel):
     seeded: int
     skipped: int
     errors: int
+
+
+class IndexStatusResponse(BaseModel):
+    indexed: int
+    failed: int
+    skipped: int = 0
+    total_tokens: int

@@ -1,4 +1,4 @@
-"""OpenSearch 인덱스 관리: rag_knowledge 인덱스 및 하이브리드 검색 파이프라인."""
+"""OpenSearch 인덱스 관리: rag_knowledge, books, user_books 인덱스 및 하이브리드 검색 파이프라인."""
 
 import logging
 
@@ -28,6 +28,92 @@ RAG_KNOWLEDGE_MAPPING = {
             "category": {"type": "keyword"},   # recommend 전용
             "author": {"type": "text"},
             "embedding": {
+                "type": "knn_vector",
+                "dimension": 1536,
+                "method": {
+                    "name": "hnsw",
+                    "space_type": "cosinesimil",
+                    "engine": "nmslib",
+                },
+            },
+        }
+    },
+}
+
+# ── books 인덱스 ──────────────────────────────────────────────────────────────
+BOOKS_INDEX = "books"
+
+BOOKS_INDEX_MAPPING = {
+    "settings": {
+        "index": {
+            "knn": True,
+        },
+    },
+    "mappings": {
+        "properties": {
+            "book_id": {"type": "keyword"},
+            "title": {
+                "type": "text",
+                "analyzer": "nori",
+                "fields": {"keyword": {"type": "keyword"}},
+            },
+            "author": {
+                "type": "text",
+                "analyzer": "nori",
+                "fields": {"keyword": {"type": "keyword"}},
+            },
+            "genre": {"type": "keyword"},
+            "description": {"type": "text", "analyzer": "nori"},
+            "isbn": {"type": "keyword"},
+            "cover_image_url": {"type": "keyword", "index": False},
+            "embedding": {
+                "type": "knn_vector",
+                "dimension": 1536,
+                "method": {
+                    "name": "hnsw",
+                    "space_type": "cosinesimil",
+                    "engine": "nmslib",
+                },
+            },
+        }
+    },
+}
+
+# ── user_books 인덱스 ─────────────────────────────────────────────────────────
+USER_BOOKS_INDEX = "user_books"
+
+USER_BOOKS_INDEX_MAPPING = {
+    "settings": {
+        "index": {
+            "knn": True,
+        },
+    },
+    "mappings": {
+        "properties": {
+            # user_book_id = "{user_id}_{book_id}"
+            "user_book_id": {"type": "keyword"},
+            "user_id": {"type": "keyword"},
+            "book_id": {"type": "keyword"},
+            "book_title": {
+                "type": "text",
+                "analyzer": "nori",
+                "fields": {"keyword": {"type": "keyword"}},
+            },
+            "rating": {"type": "integer"},       # 1~5, null 가능
+            "status": {"type": "keyword"},        # reading / read / wishlist
+            "memo_text": {"type": "text", "analyzer": "nori"},  # nullable
+            # books 인덱스에서 복사한 책 임베딩 (취향 벡터 계산에 사용)
+            "book_embedding": {
+                "type": "knn_vector",
+                "dimension": 1536,
+                "method": {
+                    "name": "hnsw",
+                    "space_type": "cosinesimil",
+                    "engine": "nmslib",
+                },
+            },
+            # 유저 메모 임베딩 (메모가 있을 때만 null이 아님)
+            "memo_embedding": {
                 "type": "knn_vector",
                 "dimension": 1536,
                 "method": {
@@ -79,3 +165,21 @@ def ensure_knowledge_index() -> None:
         logger.info("Created OpenSearch index '%s'", RAG_KNOWLEDGE_INDEX)
 
     _ensure_hybrid_pipeline()
+
+
+def ensure_books_index() -> None:
+    """books OpenSearch 인덱스 자동 생성."""
+    if os_client.indices.exists(index=BOOKS_INDEX):
+        logger.info("OpenSearch index '%s' already exists", BOOKS_INDEX)
+    else:
+        os_client.indices.create(index=BOOKS_INDEX, body=BOOKS_INDEX_MAPPING)
+        logger.info("Created OpenSearch index '%s'", BOOKS_INDEX)
+
+
+def ensure_user_books_index() -> None:
+    """user_books OpenSearch 인덱스 자동 생성."""
+    if os_client.indices.exists(index=USER_BOOKS_INDEX):
+        logger.info("OpenSearch index '%s' already exists", USER_BOOKS_INDEX)
+    else:
+        os_client.indices.create(index=USER_BOOKS_INDEX, body=USER_BOOKS_INDEX_MAPPING)
+        logger.info("Created OpenSearch index '%s'", USER_BOOKS_INDEX)

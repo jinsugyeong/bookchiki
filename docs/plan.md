@@ -163,11 +163,12 @@ recommendations
 - [x] `recommendations.py` 신규 엔드포인트 (`/ask`, `/profile`, `/refresh`)
 - [x] 스키마 업데이트 (AskRequest/Response, ProfileResponse, PipelineStatusResponse, SeedStatusResponse)
 
-#### 구현 태스크 (Phase 4.1 — OpenSearch 인프라)
-- [ ] 1. `opensearch/index.py` — `books`, `user_memos` 인덱스 매핑 추가
-- [ ] 2. `services/book_indexer.py` (신규) — books DB → `books` 인덱스 임베딩/upsert
-- [ ] 3. `services/memo_indexer.py` (신규) — user_books.memo → `user_memos` 인덱스 임베딩/upsert
-- [ ] 4. `main.py` — `ensure_books_index()`, `ensure_user_memos_index()` 시작 시 호출
+#### 구현 태스크 (Phase 4.1 — OpenSearch 인프라) ✅ 완료
+- [x] 1. `opensearch/index.py` — `books`, `user_books` 인덱스 매핑 추가
+- [x] 2. `services/book_indexer.py` (신규) — books DB → `books` 인덱스 임베딩/upsert
+- [x] 3. `services/user_book_indexer.py` (신규) — user_books 평점/메모 → `user_books` 인덱스 임베딩/upsert (`book_embedding` + `memo_embedding` 통합)
+- [x] 4. `main.py` — `ensure_books_index()`, `ensure_user_books_index()` 시작 시 호출
+- [x] `POST /admin/index-books`, `POST /admin/index-user-books` 엔드포인트 추가
 
 #### 구현 태스크 (Phase 4.2 — 검색/추천 파이프라인)
 - [ ] 5. `services/book_search.py` (신규) — `books` 인덱스 하이브리드 검색 (BM25 + k-NN)
@@ -176,8 +177,8 @@ recommendations
   - 취향 벡터 = 평점 가중 책 임베딩 + 메모 임베딩 합산
   - OpenSearch `books` 인덱스 하이브리드 검색으로 후보 추출
   - LLM은 추천 이유 생성만
-- [ ] 7. `api/recommendations.py` — `/admin/index-books`, `/admin/index-memos` 엔드포인트 추가
-- [ ] 8. `api/user_books.py` — 메모 변경 시 `user_memos` 인덱스 실시간 갱신
+- [ ] 7. `api/recommendations.py` — `/admin/index-books`, `/admin/index-user-books` 엔드포인트 추가
+- [ ] 8. `api/user_books.py` — 평점/메모 변경 시 `user_books` 인덱스 실시간 갱신
 
 #### 구현 태스크 (Phase 4.3 — 앙상블 CF, 데이터 충분 후)
 - [ ] 9. CF 모델 학습 (ALS 또는 LightFM)

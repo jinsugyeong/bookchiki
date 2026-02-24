@@ -22,6 +22,7 @@ from app.schemas.recommendation import (
     ProfileResponse,
     PipelineStatusResponse,
     SeedStatusResponse,
+    IndexStatusResponse,
 )
 from app.services.recommend import get_recommendations, validate_suggestions_against_aladin
 from app.services.rag import search_knowledge
@@ -266,6 +267,58 @@ async def index_knowledge_base(
         skipped=result.skipped,
         errors=result.errors,
         source_stats=result.source_stats,
+    )
+
+
+@admin_router.post("/index-books", response_model=IndexStatusResponse)
+async def index_books(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """books DB → OpenSearch books 인덱스 전체 임베딩/upsert (관리자).
+
+    OpenAI API 과금이 발생합니다.
+    """
+    from app.services.book_indexer import index_all_books
+
+    result = await index_all_books(db)
+
+    logger.info(
+        "[admin] index-books: indexed=%d failed=%d total_tokens=%d",
+        result["indexed"], result["failed"], result["total_tokens"],
+    )
+
+    return IndexStatusResponse(
+        indexed=result["indexed"],
+        failed=result["failed"],
+        total_tokens=result["total_tokens"],
+    )
+
+
+@admin_router.post("/index-user-books", response_model=IndexStatusResponse)
+async def index_user_books(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """user_books 평점/메모 → OpenSearch user_books 인덱스 전체 임베딩/upsert (관리자).
+
+    메모가 있는 항목만 OpenAI API 과금이 발생합니다.
+    book_embedding은 books 인덱스에서 조회 (재임베딩 없음).
+    """
+    from app.services.user_book_indexer import index_all_user_books
+
+    result = await index_all_user_books(db)
+
+    logger.info(
+        "[admin] index-user-books: indexed=%d failed=%d skipped=%d total_tokens=%d",
+        result["indexed"], result["failed"], result["skipped"], result["total_tokens"],
+    )
+
+    return IndexStatusResponse(
+        indexed=result["indexed"],
+        failed=result["failed"],
+        skipped=result["skipped"],
+        total_tokens=result["total_tokens"],
     )
 
 

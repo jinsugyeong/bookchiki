@@ -93,7 +93,7 @@ cd backend && python reset_db.py
 | `POST /imports/csv` | CSV 임포트 |
 | `POST /admin/seed-community-books` | 초기 도서 데이터 시딩 (관리자) |
 | `POST /admin/index-books` | books → OpenSearch 인덱싱 (관리자) |
-| `POST /admin/index-memos` | 메모 → OpenSearch 인덱싱 (관리자) |
+| `POST /admin/index-user-books` | 평점/메모 → OpenSearch 인덱싱 (관리자) |
 
 ## 프로젝트 구조
 
@@ -110,7 +110,7 @@ bookchiki/
 │   │   │   ├── recommend.py        # 추천 파이프라인 (기록 기반)
 │   │   │   ├── profile_cache.py    # 취향 프로필 캐시 관리
 │   │   │   ├── book_indexer.py     # books → OpenSearch 인덱서
-│   │   │   ├── memo_indexer.py     # 메모 → OpenSearch 인덱서
+│   │   │   ├── user_book_indexer.py # 평점/메모 → OpenSearch 인덱서
 │   │   │   └── book_search.py      # OpenSearch 하이브리드 검색
 │   │   ├── opensearch/     # 인덱스 매핑 관리
 │   │   └── core/           # 설정, DB, 인증
