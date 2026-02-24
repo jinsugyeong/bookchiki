@@ -116,8 +116,8 @@ recommendations  전체 파이프라인 실행
 테이블 직접 SELECT   │
 (~10ms, API 0회)    ├─ 1. 유저 서재 로드
         │           ├─ 2. 취향 벡터 계산
-        │           │      - books 인덱스에서 평점 있는 책 임베딩 조회
-        │           │      - user_memos 인덱스에서 메모 임베딩 조회
+        │           │      - user_books 인덱스 단일 쿼리
+        │           │        (book_embedding + rating + memo_embedding 한 번에 조회)
         │           │      - α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩
         │           ├─ 3. 장르 키워드 추출 (선호 장르)
         │           ├─ 4. OpenSearch books 인덱스 하이브리드 검색

@@ -21,9 +21,15 @@ async def lifespan(app: FastAPI):
 
     # Ensure OpenSearch indexes exist
     try:
-        from app.opensearch.index import ensure_knowledge_index
+        from app.opensearch.index import (
+            ensure_knowledge_index,
+            ensure_books_index,
+            ensure_user_books_index,
+        )
         ensure_knowledge_index()
-        logger.info("OpenSearch rag_knowledge index ready")
+        ensure_books_index()
+        ensure_user_books_index()
+        logger.info("OpenSearch indexes ready: rag_knowledge, books, user_books")
     except Exception as e:
         logger.warning(f"OpenSearch not available — skipping index init: {e}")
 

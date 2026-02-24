@@ -12,7 +12,6 @@ from app.models.user import User
 from app.models.book import Book
 from app.models.user_book import UserBook
 from app.schemas.user_book import UserBookCreate, UserBookUpdate, UserBookResponse, ReadingStats
-from app.services.recommend import invalidate_cache
 from app.services.profile_cache import mark_profile_dirty
 
 router = APIRouter(prefix="/my-books", tags=["my-books"])
@@ -127,16 +126,11 @@ async def update_my_book(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found in your library")
 
     update_data = update.model_dump(exclude_unset=True)
-    rating_changed = "rating" in update_data and update_data["rating"] != user_book.rating
 
     for field, value in update_data.items():
         setattr(user_book, field, value)
 
     await db.commit()
-
-    # 인메모리 추천 캐시 무효화 (평점 변경 시)
-    if rating_changed:
-        invalidate_cache(current_user.id)
 
     # DB 추천 캐시 dirty 마킹
     await mark_profile_dirty(db, current_user.id, reason="book_updated")
