@@ -14,7 +14,7 @@
 import logging
 import re
 from pathlib import Path
-from typing import List, Any, Tuple
+from typing import List, Any
 from .base_parser import BaseParser, Chunk
 
 logger = logging.getLogger(__name__)
@@ -71,20 +71,20 @@ class MonthlyClosingParser(BaseParser):
             sections = self._split_by_month(content)
 
             for month, entries in sections:
-                if month and entries:
-                    chunk_text = self._create_chunk_text(month, entries)
+                self.parse_stats["total_items"] += len(entries)
+                for count, book_title in entries:
+                    chunk_text = f"{month} 월말결산 베스트: {book_title} ({count}회 언급)"
                     chunk = Chunk(
                         text=chunk_text,
                         source=self.source_name,
                         metadata={
                             "month": month,
-                            "entry_count": len(entries),
+                            "book_title": book_title,
+                            "mention_count": count,
                         },
                     )
                     chunks.append(chunk)
                     self.parse_stats["successful_chunks"] += 1
-
-                self.parse_stats["total_items"] += len(entries)
 
         except Exception as e:
             logger.error("Failed to parse monthly_closing_best.md: %s", e)
@@ -98,7 +98,7 @@ class MonthlyClosingParser(BaseParser):
 
         return chunks
 
-    def _split_by_month(self, content: str) -> List[Tuple[str, List[tuple]]]:
+    def _split_by_month(self, content: str) -> List[tuple]:
         """
         마크다운 콘텐츠를 월별로 분리합니다.
 
@@ -161,27 +161,9 @@ class MonthlyClosingParser(BaseParser):
                     entries.append((count, book_title))
             else:
                 # 횟수 없이 제목만 있는 경우 (count=1 기본값)
-                if line and not line.isdigit():
+                # 날짜 패턴(YYYY-MM, YYYY/MM) 라인은 책 제목 아님 → 제외
+                if line and not line.isdigit() and not re.match(r"^\d{4}[-/]\d{2}$", line):
                     entries.append((1, line))
 
         return entries
 
-    def _create_chunk_text(self, month: str, entries: List[tuple]) -> str:
-        """
-        청크 텍스트를 생성합니다.
-
-        Args:
-            month: 월 정보 (예: "2025-11")
-            entries: (count, book_title) 튜플의 리스트
-
-        Returns:
-            청크 텍스트
-        """
-        lines = [f"{month} 월말결산 베스트 책:"]
-
-        # 횟수 내림차순 정렬 후 상위 10개
-        sorted_entries = sorted(entries, key=lambda x: x[0], reverse=True)
-        for rank, (count, book_title) in enumerate(sorted_entries[:10], 1):
-            lines.append(f"{rank}. {book_title} ({count}회 언급)")
-
-        return "\n".join(lines)

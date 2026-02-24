@@ -70,20 +70,24 @@ class RecommendParser(BaseParser):
                 # 테이블에서 책과 추천사 추출
                 rows = self._parse_table(section_content)
 
-                for book_title, recommendation, count in rows:
+                for book_title, author_hint, recommendation, count in rows:
                     if book_title and recommendation:
                         chunk_text = self._create_chunk_text(
                             category, book_title, recommendation
                         )
 
+                        metadata = {
+                            "category": category,
+                            "book_title": book_title,
+                            "recommendation_count": count,
+                        }
+                        if author_hint:
+                            metadata["author_hint"] = author_hint
+
                         chunk = Chunk(
                             text=chunk_text,
                             source=self.source_name,
-                            metadata={
-                                "category": category,
-                                "book_title": book_title,
-                                "recommendation_count": count,
-                            },
+                            metadata=metadata,
                         )
                         chunks.append(chunk)
                         self.parse_stats["successful_chunks"] += 1
@@ -133,13 +137,15 @@ class RecommendParser(BaseParser):
 
     def _parse_table(self, section_content: str) -> List[tuple]:
         """
-        마크다운 테이블을 파싱하여 (책제목, 추천사, 횟수) 추출합니다.
+        마크다운 테이블을 파싱하여 (책제목, 저자힌트, 추천사, 횟수) 추출합니다.
+
+        "책제목 - 저자명" 형식의 셀은 제목과 저자를 분리합니다.
 
         Args:
             section_content: 섹션 내용
 
         Returns:
-            (book_title, recommendation, count) 튜플의 리스트
+            (book_title, author_hint, recommendation, count) 튜플의 리스트
         """
         rows = []
         lines = section_content.split("\n")
@@ -164,19 +170,35 @@ class RecommendParser(BaseParser):
             cells = [cell.strip() for cell in line.split("|")[1:-1]]
 
             if len(cells) >= 2:
-                # 첫 번째 셀: "책 제목 (숫자)"
                 title_cell = cells[0]
-                match = re.match(r"^(.+?)\s*\((\d+)\)\s*$", title_cell)
 
+                # 1단계: "책제목 - 저자명" 형식에서 저자 분리 (저자 먼저 분리)
+                author_hint = ""
+                if " - " in title_cell:
+                    parts = title_cell.rsplit(" - ", 1)
+                    title_part = parts[0].strip()
+                    author_hint = parts[1].strip()
+                else:
+                    title_part = title_cell
+
+                # 2단계: "책 제목 (횟수)" 형식에서 횟수 추출
+                # "모순 (5) - 양귀자" → title_part="모순 (5)" → book_title="모순", count=5
+                match = re.match(r"^(.+?)\s*\((\d+)\)\s*$", title_part)
                 if match:
                     book_title = match.group(1).strip()
                     count = int(match.group(2))
                 else:
-                    book_title = title_cell
+                    book_title = title_part
                     count = 1
 
+                if author_hint:
+                    logger.debug(
+                        "저자 분리: '%s' → 제목='%s', 저자='%s'",
+                        title_cell, book_title, author_hint,
+                    )
+
                 recommendation = cells[1]
-                rows.append((book_title, recommendation, count))
+                rows.append((book_title, author_hint, recommendation, count))
 
         return rows
 

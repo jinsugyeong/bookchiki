@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 

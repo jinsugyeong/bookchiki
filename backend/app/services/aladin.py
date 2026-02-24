@@ -16,7 +16,7 @@ async def search_books(query: str, max_results: int = 20) -> list[BookSearchResu
         "QueryType": "Keyword",
         "MaxResults": max_results,
         "start": 1,
-        "SearchTarget": "Book",
+        "SearchTarget": "All",
         "output": "js",
         "Version": "20131101",
         "Cover": "Big",
@@ -27,8 +27,12 @@ async def search_books(query: str, max_results: int = 20) -> list[BookSearchResu
         resp.raise_for_status()
         data = resp.json()
 
+    _ALLOWED_MALL_TYPES = {"BOOK", "EBOOK"}
+
     results: list[BookSearchResult] = []
     for item in data.get("item", []):
+        if item.get("mallType") not in _ALLOWED_MALL_TYPES:
+            continue
         published_at = None
         pub_date = item.get("pubDate", "")
         if pub_date:

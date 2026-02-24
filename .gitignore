@@ -36,6 +36,11 @@ CLAUDE.md
 /output
 /backups
 
+# log
+/logs
+/log
+*.log
+
 # test용
 *.ipynb
 requirements.txt
