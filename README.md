@@ -35,10 +35,9 @@ GET /recommendations
 false           true
    │               │
 캐시 히트        파이프라인 실행
-(~10ms)         ├─ GPT-4o-mini로 책 후보 생성 (limit × 2.5개)
-                ├─ 알라딘 API 실존 검증 (퍼지 매칭 0.75, 동시 5개)
-                ├─ 취향 벡터 cosine similarity 재랭킹
-                ├─ 최종 N권만 DB + OpenSearch 저장
+(~10ms)         ├─ 취향 벡터 계산 (평점 가중 임베딩 + 메모 임베딩)
+                ├─ OpenSearch books 인덱스 하이브리드 검색 (BM25 + KNN)
+                ├─ 최종 N권 DB 저장
                 ├─ user_preference_profiles 갱신 (is_dirty=false)
                 └─ 추천 이유 생성 (GPT-4o-mini)
 ```
@@ -92,7 +91,9 @@ cd backend && python reset_db.py
 | `GET /recommendations/profile` | 취향 프로필 조회 |
 | `POST /recommendations/refresh` | 강제 추천 재생성 |
 | `POST /imports/csv` | CSV 임포트 |
-| `POST /admin/seed-community-books` | 커뮤니티 데이터 시딩 (관리자) |
+| `POST /admin/seed-community-books` | 초기 도서 데이터 시딩 (관리자) |
+| `POST /admin/index-books` | books → OpenSearch 인덱싱 (관리자) |
+| `POST /admin/index-memos` | 메모 → OpenSearch 인덱싱 (관리자) |
 
 ## 프로젝트 구조
 
@@ -107,9 +108,10 @@ bookchiki/
 │   │   │   ├── book_import.py      # CSV 파싱
 │   │   │   ├── rag.py              # 임베딩 + 하이브리드 검색
 │   │   │   ├── recommend.py        # 추천 파이프라인 (기록 기반)
-│   │   │   ├── profile_cache.py    # 취향 프로필 캐시 관리 (신규, 재설계 중)
-│   │   │   └── rag_pipeline/       # 커뮤니티 데이터 파서
-│   │   │       └── parsers/        # recommend / book_reviews / monthly_closing / thread_reviews
+│   │   │   ├── profile_cache.py    # 취향 프로필 캐시 관리
+│   │   │   ├── book_indexer.py     # books → OpenSearch 인덱서
+│   │   │   ├── memo_indexer.py     # 메모 → OpenSearch 인덱서
+│   │   │   └── book_search.py      # OpenSearch 하이브리드 검색
 │   │   ├── opensearch/     # 인덱스 매핑 관리
 │   │   └── core/           # 설정, DB, 인증
 │   └── .env.example

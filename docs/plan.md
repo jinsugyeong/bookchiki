@@ -14,7 +14,7 @@
 | 프론트엔드 | Next.js (App Router) + Tailwind CSS |
 | 백엔드 | FastAPI (Python) |
 | 메인 DB | PostgreSQL (유저, 책, 이미지 메타데이터) |
-| 검색/벡터 | OpenSearch (커뮤니티 지식 RAG + 벡터 인덱싱) |
+| 검색/벡터 | OpenSearch (지식 RAG + 벡터 인덱싱) |
 | AI | OpenAI API (GPT-4o-mini, text-embedding-3-small) |
 | 이미지 저장 | AWS S3 |
 | 배포 | AWS EC2 (백엔드) + Vercel (프론트) + AWS RDS (PostgreSQL) |
@@ -109,25 +109,24 @@ recommendations
 - [x] 북적북적 CSV 임포트 파싱 로직 (중복 감지 포함)
 - [x] 독서 통계 집계 API (월별 독서량, 장르 분포, 평균 별점)
 
-### Phase 3 — OpenSearch + AI 추천 ✅ 완료
+### Phase 3 — OpenSearch + AI 추천 (초기 구현 ✅, 재설계로 대체)
 - [x] 별점 가중치 반영 취향 벡터 계산
-- [x] GPT-4o-mini로 책 후보 생성
-- [x] 알라딘 API 실존 검증 (퍼지 매칭)
-- [x] 취향 벡터 cosine similarity 재랭킹
 - [x] 추천 캐싱 (`is_dirty` 이벤트 기반)
-- [x] LLM 후보 생성 → 알라딘 실존 검증 → 취향 벡터 재랭킹 → 최종 선택 후에만 DB 저장
+- ~~[x] GPT-4o-mini로 책 후보 생성~~ → Phase 4에서 OpenSearch 검색으로 대체
+- ~~[x] 알라딘 API 실존 검증 (퍼지 매칭)~~ → 제거 (books 인덱스가 실존 책만 포함)
+- ~~[x] 취향 벡터 cosine similarity 재랭킹~~ → OpenSearch k-NN으로 대체
 
-### Phase 3.5 — 커뮤니티 데이터 시딩 ✅ 완료
+### Phase 3.5 — 초기 도서 데이터 시딩 ✅ 완료
 
-> **목표:** 커뮤니티 독서 데이터를 books DB에 대량 시딩하여 시스템 1 추천 풀 확장
+> **목표:** 외부 도서 데이터를 books DB에 대량 시딩하여 시스템 1 추천 풀 확장
 
 #### 추천 시스템 아키텍처 결정
-- **시스템 1 (취향 기반):** 커뮤니티 데이터에서 **책 제목만** 추출 → 알라딘 검증 → books 풀 등록 → 취향 벡터 재랭킹 파이프라인 활용
+- **시스템 1 (취향 기반):** 외부 데이터에서 **책 제목만** 추출 → 알라딘 검증 → books 풀 등록 → 취향 벡터 재랭킹 파이프라인 활용
 - **시스템 2 (자연어 질문 기반):**
   - **구현 완료** (`/recommendations/ask`): 저장된 취향 프로필 + 사용자 질문 → `rag_knowledge` 인덱스 하이브리드 검색 → LLM 맞춤 추천
-- **파서 공용:** 커뮤니티 데이터를 책 제목 (시스템 1용) + 청크 텍스트 (시스템 2용) 모두 추출
+- **파서 공용:** 외부 데이터를 책 제목 (시스템 1용) + 청크 텍스트 (시스템 2용) 모두 추출
 
-#### 커뮤니티 데이터 소스 (`output/` 디렉토리)
+#### 데이터 소스 (`output/` 디렉토리)
 | 파일 | 목적 | 청크 수 |
 |---|---|---|
 | `book_reviews.json` | 책 제목 추출 + 리뷰 청크 임베딩 | 2,456 |
@@ -150,38 +149,43 @@ recommendations
 
 ### Phase 4 — 추천 시스템 재설계 🚧 진행 중
 
-> **목표:** 인메모리 캐시(TTL 기반) → DB 영속 캐시(이벤트 기반) 전환. 성능 개선(~30초 → ~10ms) + 캐시 무효화 정확도 향상.
+> **목표:** LLM 후보 생성 + 알라딘 검증 파이프라인 → OpenSearch 하이브리드 검색 기반으로 전환.
+> DB 캐시 (`is_dirty` 이벤트 기반) + 유저 메모 임베딩 반영 + 앙상블(CF) 준비.
 
 #### 설계 문서
-- [docs/recommendation-profile-cache-design.md](./docs/recommendation-profile-cache-design.md) — 상세 기술 설계
+- [docs/recommendation-profile-cache-design.md](./recommendation-profile-cache-design.md) — 캐시 아키텍처 설계
 
-#### 구현 태스크 (Phase 4.1 — DB 캐시 기반 구축)
-- [x] 1. `user_preference_profiles` 모델 정의 (`backend/app/models/user_preference_profile.py`)
-- [x] 2. `profile_cache.py` 서비스 구현 (mark_dirty, get_or_create, update, is_recommendation_fresh 함수)
-- [x] 3. `user_books.py` API에 dirty 마킹 추가 (POST → book_added, PATCH → book_updated, DELETE → book_deleted)
-- [x] 4. `imports.py`에 CSV 임포트 후 dirty 마킹 추가 (csv_imported)
-- [ ] 5. `recommend.py` 캐시 로직 DB 기반으로 전환
-  - 인메모리 dict `_recommendation_cache`, `_memo_analysis_cache` 제거
-  - DB에서 캐시 확인 → `is_dirty` 기반 재생성 분기
-- [x] 6. `recommendations.py` 신규 엔드포인트 추가
-  - `POST /recommendations/ask` — 취향 프로필 + 자연어 질문 기반 맞춤 추천
-  - `GET /recommendations/profile` — 취향 프로필 조회 (디버그/UI용)
-  - `POST /recommendations/refresh` — 강제 추천 재생성
-- [x] 7. 응답 스키마 업데이트 (`backend/app/schemas/recommendation.py`) — AskRequest/Response, ProfileResponse, PipelineStatusResponse, SeedStatusResponse 추가
-- [ ] 8. Alembic 마이그레이션 파일 생성
+#### 완료된 작업 ✅
+- [x] `user_preference_profiles` 모델 정의
+- [x] `profile_cache.py` 서비스 구현 (mark_dirty, get_or_create, update, is_recommendation_fresh)
+- [x] `user_books.py` API에 dirty 마킹 추가 (4개 트리거)
+- [x] `imports.py`에 CSV 임포트 후 dirty 마킹 추가
+- [x] `recommendations.py` 신규 엔드포인트 (`/ask`, `/profile`, `/refresh`)
+- [x] 스키마 업데이트 (AskRequest/Response, ProfileResponse, PipelineStatusResponse, SeedStatusResponse)
 
-#### 구현 태스크 (Phase 4.2 — 최적화 및 완성)
-- [ ] 9. 동시성 제어 검증 (낙관적 concurrency, `version` 컬럼)
-- [ ] 10. Cold start 시 프론트엔드 UX (로딩 스피너, 백그라운드 갱신)
-- [x] 11. 레거시 코드 제거 (자연어 검색, books 인덱싱 제거)
+#### 구현 태스크 (Phase 4.1 — OpenSearch 인프라)
+- [ ] 1. `opensearch/index.py` — `books`, `user_memos` 인덱스 매핑 추가
+- [ ] 2. `services/book_indexer.py` (신규) — books DB → `books` 인덱스 임베딩/upsert
+- [ ] 3. `services/memo_indexer.py` (신규) — user_books.memo → `user_memos` 인덱스 임베딩/upsert
+- [ ] 4. `main.py` — `ensure_books_index()`, `ensure_user_memos_index()` 시작 시 호출
+
+#### 구현 태스크 (Phase 4.2 — 검색/추천 파이프라인)
+- [ ] 5. `services/book_search.py` (신규) — `books` 인덱스 하이브리드 검색 (BM25 + k-NN)
+- [ ] 6. `services/recommend.py` 전면 재작성
+  - LLM 후보 생성 / 알라딘 검증 / 인메모리 재랭킹 제거
+  - 취향 벡터 = 평점 가중 책 임베딩 + 메모 임베딩 합산
+  - OpenSearch `books` 인덱스 하이브리드 검색으로 후보 추출
+  - LLM은 추천 이유 생성만
+- [ ] 7. `api/recommendations.py` — `/admin/index-books`, `/admin/index-memos` 엔드포인트 추가
+- [ ] 8. `api/user_books.py` — 메모 변경 시 `user_memos` 인덱스 실시간 갱신
+
+#### 구현 태스크 (Phase 4.3 — 앙상블 CF, 데이터 충분 후)
+- [ ] 9. CF 모델 학습 (ALS 또는 LightFM)
+  - 학습 데이터: `user_books` 평점 + 메모 임베딩 + 읽기 상태
+- [ ] 10. 앙상블 스코어링: `α × OpenSearch점수 + (1-α) × CF점수`
+  - α 동적 조절: 서재 책 수 < 10 → α=0.9, ≥ 30 → α=0.5
+- [ ] 11. Alembic 마이그레이션 파일 생성
 - [ ] 12. 통합 테스트 작성
-
-#### 제거된 기능 (Phase 4.3 ✅ 완료)
-- [x] `/search/natural` 엔드포인트 제거 (자연어 검색)
-- [x] `books` OpenSearch 인덱스 임베딩 제거
-- [x] `rag.py`의 `search_books_hybrid()`, `knn_search()`, `_seed_from_aladin_for_search()` 함수 제거
-- [x] `POST /admin/index-books` 엔드포인트 제거
-- [x] 책 저장 시 OpenSearch 자동 인덱싱 제거 (OpenAI API 호출 비용 절감)
 
 
 ### Phase 5 — 프론트엔드 ⏳ 예정
