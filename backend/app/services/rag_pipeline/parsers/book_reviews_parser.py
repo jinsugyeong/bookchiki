@@ -112,6 +112,7 @@ class BookReviewsParser(BaseParser):
             if not reviews or not isinstance(reviews, list):
                 self.parse_stats["skipped_items"] += 1
                 return chunks
+            
 
             # 각 리뷰를 개별 청크로 생성
             for review in reviews:
