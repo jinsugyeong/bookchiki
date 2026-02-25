@@ -5,8 +5,12 @@ backup_books.py로 생성한 JSON 덤프 파일을 읽어
 임베딩 벡터 포함 그대로 OpenSearch에 재적재합니다.
 
 사용법:
+    # Docker 컨테이너 내부에서 실행 (권장, /project 마운트 기준)
+    docker compose exec -w /project backend python scripts/restore_books.py --input backups/books_20250222_120000.json
+    docker compose exec -w /project backend python scripts/restore_books.py --input backup.json --clear
+
+    # 호스트에서 직접 실행
     python scripts/restore_books.py --input backups/books_20250222_120000.json
-    python scripts/restore_books.py --input backup.json --clear  # 기존 인덱스 초기화 후 복원
 """
 
 import argparse
@@ -15,9 +19,9 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))               # scripts/ (restore_rag_knowledge 임포트용)
-sys.path.insert(0, str(SCRIPT_DIR.parent))        # /app (Docker)
-sys.path.insert(0, str(SCRIPT_DIR.parent.parent / "backend"))  # /repo/backend (host)
+BACKEND_DIR = SCRIPT_DIR.parent / "backend"
+sys.path.insert(0, str(SCRIPT_DIR))        # scripts/ (restore_rag_knowledge 임포트용)
+sys.path.insert(0, str(BACKEND_DIR))
 
 logging.basicConfig(
     level=logging.INFO,

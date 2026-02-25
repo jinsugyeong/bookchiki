@@ -4,11 +4,10 @@ SQL 덤프 파일에서 PostgreSQL DB 복원.
 백업 파일(backup_postgres.py로 생성)을 읽어 DB에 복원합니다.
 
 사용법:
-    # Docker 안에서 실행 (권장)
-    docker compose exec backend python scripts/restore_postgres.py backups/bookchiki_20260223_120000.sql
-
-    # 호스트에서 직접 실행
+    # 호스트에서 실행 (권장 — Docker CLI 필요)
     python scripts/restore_postgres.py backups/bookchiki_20260223_120000.sql
+
+    # psql이 로컬에 설치된 경우 Docker 없이 직접 실행
     python scripts/restore_postgres.py backups/bookchiki_20260223_120000.sql --direct
 """
 

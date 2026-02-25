@@ -5,12 +5,12 @@ pg_dump를 Docker exec로 실행하여 ./backups/ 에 저장합니다.
 Docker 없이 psql이 로컬에 설치된 경우에도 직접 실행 가능.
 
 사용법:
-    # Docker 안에서 실행 (권장)
-    docker compose exec backend python scripts/backup_postgres.py
-
-    # 호스트에서 직접 실행
+    # 호스트에서 실행 (권장 — Docker CLI 필요)
     python scripts/backup_postgres.py
     python scripts/backup_postgres.py --output backups/my_backup.sql
+
+    # pg_dump가 로컬에 설치된 경우 Docker 없이 직접 실행
+    python scripts/backup_postgres.py --direct
 """
 
 import argparse
