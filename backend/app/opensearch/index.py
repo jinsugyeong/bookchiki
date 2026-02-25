@@ -168,12 +168,14 @@ def ensure_knowledge_index() -> None:
 
 
 def ensure_books_index() -> None:
-    """books OpenSearch 인덱스 자동 생성."""
+    """books OpenSearch 인덱스 및 하이브리드 검색 파이프라인 자동 생성."""
     if os_client.indices.exists(index=BOOKS_INDEX):
         logger.info("OpenSearch index '%s' already exists", BOOKS_INDEX)
     else:
         os_client.indices.create(index=BOOKS_INDEX, body=BOOKS_INDEX_MAPPING)
         logger.info("Created OpenSearch index '%s'", BOOKS_INDEX)
+
+    _ensure_hybrid_pipeline()
 
 
 def ensure_user_books_index() -> None:

@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 from collections import Counter
 
@@ -13,6 +14,9 @@ from app.models.book import Book
 from app.models.user_book import UserBook
 from app.schemas.user_book import UserBookCreate, UserBookUpdate, UserBookResponse, ReadingStats
 from app.services.profile_cache import mark_profile_dirty
+from app.services.user_book_indexer import index_user_book, delete_user_book
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/my-books", tags=["my-books"])
 
@@ -85,8 +89,8 @@ async def add_book(
 ):
     """Add a book to current user's library."""
     # Check book exists
-    book = await db.execute(select(Book).where(Book.id == user_book_in.book_id))
-    if book.scalar_one_or_none() is None:
+    book_obj = (await db.execute(select(Book).where(Book.id == user_book_in.book_id))).scalar_one_or_none()
+    if book_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     # Check duplicate
@@ -102,6 +106,13 @@ async def add_book(
 
     # 추천 캐시 dirty 마킹
     await mark_profile_dirty(db, current_user.id, reason="book_added")
+
+    # OpenSearch user_books 인덱스 실시간 인덱싱
+    if book_obj is not None:
+        try:
+            await index_user_book(user_book, book_obj)
+        except Exception:
+            logger.warning("[user-books] Failed to index user_book after add, skipping")
 
     # Re-fetch with book relationship loaded
     result = await db.execute(
@@ -119,14 +130,15 @@ async def update_my_book(
 ):
     """Update status, rating, or memo for a book in user's library."""
     result = await db.execute(
-        select(UserBook).where(UserBook.id == user_book_id, UserBook.user_id == current_user.id)
+        select(UserBook)
+        .options(joinedload(UserBook.book))
+        .where(UserBook.id == user_book_id, UserBook.user_id == current_user.id)
     )
-    user_book = result.scalar_one_or_none()
+    user_book = result.unique().scalar_one_or_none()
     if user_book is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found in your library")
 
     update_data = update.model_dump(exclude_unset=True)
-
     for field, value in update_data.items():
         setattr(user_book, field, value)
 
@@ -134,6 +146,13 @@ async def update_my_book(
 
     # DB 추천 캐시 dirty 마킹
     await mark_profile_dirty(db, current_user.id, reason="book_updated")
+
+    # OpenSearch user_books 인덱스 실시간 갱신
+    if user_book.book is not None:
+        try:
+            await index_user_book(user_book, user_book.book)
+        except Exception:
+            logger.warning("[user-books] Failed to index user_book after update, skipping")
 
     # Re-fetch with book relationship loaded
     result = await db.execute(
@@ -156,8 +175,17 @@ async def remove_my_book(
     if user_book is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found in your library")
 
+    # 삭제 전 book_id 보존 (인덱스 삭제용)
+    book_id = user_book.book_id
+
     await db.delete(user_book)
     await db.commit()
 
     # 추천 캐시 dirty 마킹
     await mark_profile_dirty(db, current_user.id, reason="book_deleted")
+
+    # OpenSearch user_books 인덱스에서 삭제
+    try:
+        delete_user_book(current_user.id, book_id)
+    except Exception:
+        logger.warning("[user-books] Failed to delete user_book from index, skipping")

@@ -38,9 +38,10 @@ async def index_user_book(user_book: UserBook, book: Book) -> None:
     """단일 UserBook을 user_books 인덱스에 upsert.
 
     - book_embedding: books 인덱스에서 조회
-    - memo_embedding: 메모가 있을 때만 생성
+    - memo_embedding: 메모가 변경됐을 때만 새로 생성 (OpenAI API 비용 절감)
     """
     doc_id = _make_user_book_id(user_book.user_id, user_book.book_id)
+    current_memo = user_book.memo or ""
 
     # books 인덱스에서 책 임베딩 조회
     book_embedding = _get_book_embedding_from_index(user_book.book_id)
@@ -58,19 +59,34 @@ async def index_user_book(user_book: UserBook, book: Book) -> None:
         "book_title": book.title,
         "rating": user_book.rating,
         "status": user_book.status,
-        "memo_text": user_book.memo or "",
+        "memo_text": current_memo,
         "book_embedding": book_embedding,
     }
 
-    # 메모가 있으면 임베딩 생성
-    if user_book.memo and user_book.memo.strip():
-        memo_embedding, tokens = await embed_text(user_book.memo)
-        doc["memo_embedding"] = memo_embedding
-        logger.info(
-            "[user-book-indexer] Generated memo_embedding for user_book %s (tokens=%d)",
-            doc_id,
-            tokens,
-        )
+    # 기존 문서의 memo_text와 비교해서 변경됐을 때만 재임베딩
+    existing_memo_embedding = None
+    try:
+        existing_doc = os_client.get(index=USER_BOOKS_INDEX, id=doc_id)
+        existing_memo = existing_doc["_source"].get("memo_text", "")
+        if existing_memo == current_memo:
+            existing_memo_embedding = existing_doc["_source"].get("memo_embedding")
+        # memo 변경됐으면 existing_memo_embedding=None → 아래에서 재생성
+    except Exception:
+        pass  # 문서 없음 → 새로 인덱싱
+
+    if current_memo.strip():
+        if existing_memo_embedding is not None:
+            # 메모 동일 → 기존 임베딩 재사용
+            doc["memo_embedding"] = existing_memo_embedding
+        else:
+            # 메모 신규/변경 → 새로 임베딩
+            memo_embedding, tokens = await embed_text(current_memo)
+            doc["memo_embedding"] = memo_embedding
+            logger.info(
+                "[user-book-indexer] Generated memo_embedding for user_book %s (tokens=%d)",
+                doc_id,
+                tokens,
+            )
 
     os_client.index(
         index=USER_BOOKS_INDEX,
@@ -106,6 +122,17 @@ async def index_all_user_books(db: AsyncSession) -> dict:
     for user_book, book in rows:
         doc_id = _make_user_book_id(user_book.user_id, user_book.book_id)
         try:
+            # 기존 문서의 memo_text와 비교해서 변경 없으면 스킵 (OpenAI API 비용 절감)
+            current_memo = user_book.memo or ""
+            try:
+                existing_doc = os_client.get(index=USER_BOOKS_INDEX, id=doc_id)
+                existing_memo = existing_doc["_source"].get("memo_text", "")
+                if existing_memo == current_memo:
+                    skipped += 1
+                    continue
+            except Exception:
+                pass  # 문서 없음 → 새로 인덱싱
+
             bid = str(user_book.book_id)
             if bid not in embedding_cache:
                 embedding_cache[bid] = _get_book_embedding_from_index(user_book.book_id)
@@ -125,7 +152,7 @@ async def index_all_user_books(db: AsyncSession) -> dict:
                 "book_title": book.title,
                 "rating": user_book.rating,
                 "status": user_book.status,
-                "memo_text": user_book.memo or "",
+                "memo_text": current_memo,
                 "book_embedding": book_embedding,
             }
 
@@ -141,10 +168,11 @@ async def index_all_user_books(db: AsyncSession) -> dict:
             )
             indexed += 1
             logger.info(
-                "[user-book-indexer] Indexed '%s' (%d/%d)",
+                "[user-book-indexer] Indexed '%s' (%d/%d, skipped=%d)",
                 doc_id,
                 indexed,
                 len(rows),
+                skipped,
             )
         except Exception as e:
             failed += 1

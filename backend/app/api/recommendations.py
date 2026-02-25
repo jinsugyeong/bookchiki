@@ -24,7 +24,7 @@ from app.schemas.recommendation import (
     SeedStatusResponse,
     IndexStatusResponse,
 )
-from app.services.recommend import get_recommendations, validate_suggestions_against_aladin
+from app.services.recommend import get_recommendations
 from app.services.rag import search_knowledge
 from app.services.profile_cache import get_or_create_profile
 
@@ -96,27 +96,21 @@ async def ask_recommendations(
     if not suggestions_raw:
         return AskResponse(results=[], total=0, question=request.question)
 
-    # 4단계: 알라딘 실존 검증 (DB 저장 없음)
-    validated = await validate_suggestions_against_aladin(
-        suggestions=suggestions_raw,
-        exclude_isbn_set=set(),
-    )
-
     results = [
         AskResultItem(
-            title=item["title"],
-            author=item["author"],
+            title=item.get("title", ""),
+            author=item.get("author", ""),
             reason=item.get("reason_hint", ""),
-            isbn=item.get("isbn", ""),
-            cover_image_url=item.get("cover_image_url", ""),
-            genre=item.get("genre", ""),
+            isbn="",
+            cover_image_url="",
+            genre="",
         )
-        for item in validated[: request.limit]
+        for item in suggestions_raw[: request.limit]
     ]
 
     logger.info(
-        "[ask] user=%s question='%s' suggestions=%d validated=%d",
-        current_user.id, request.question, len(suggestions_raw), len(validated),
+        "[ask] user=%s question='%s' results=%d",
+        current_user.id, request.question, len(results),
     )
 
     return AskResponse(results=results, total=len(results), question=request.question)
@@ -145,7 +139,6 @@ def _to_response(r: dict) -> RecommendationResponse:
         description=r.get("description", ""),
         genre=r.get("genre", ""),
         cover_image_url=r.get("cover_image_url", ""),
-        mood=r.get("mood", ""),
         score=r["score"],
         reason=r["reason"],
     )
@@ -230,7 +223,7 @@ async def _ask_llm(
             return []
 
         logger.info("[ask-llm] Generated %d suggestions for question '%s'", len(suggestions), question)
-        return suggestions[:limit * 2]  # 알라딘 검증 탈락 대비 여유분 요청
+        return suggestions[:limit * 2]
 
     except Exception as e:
         logger.error("[ask-llm] LLM call failed: %s", e)

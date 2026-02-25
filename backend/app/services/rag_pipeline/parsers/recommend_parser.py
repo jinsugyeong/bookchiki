@@ -6,7 +6,6 @@
 
 import logging
 import re
-from pathlib import Path
 from typing import List, Any
 from .base_parser import BaseParser, Chunk
 
@@ -23,24 +22,6 @@ class RecommendParser(BaseParser):
     def __init__(self):
         """추천리스트 파서 초기화."""
         super().__init__(source_name="recommend")
-
-    def validate(self, data: Any) -> bool:
-        """
-        입력 데이터의 유효성을 확인합니다.
-
-        Args:
-            data: 파일 경로 (str) 또는 파일 내용 (str)
-
-        Returns:
-            유효성 여부
-        """
-        if isinstance(data, str):
-            # 파일 경로인 경우
-            if data.endswith(".md"):
-                return Path(data).exists()
-            # 파일 내용인 경우
-            return "##" in data or "|" in data
-        return False
 
     def parse(self, data: Any) -> List[Chunk]:
         """

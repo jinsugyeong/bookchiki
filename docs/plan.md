@@ -170,15 +170,24 @@ recommendations
 - [x] 4. `main.py` — `ensure_books_index()`, `ensure_user_books_index()` 시작 시 호출
 - [x] `POST /admin/index-books`, `POST /admin/index-user-books` 엔드포인트 추가
 
-#### 구현 태스크 (Phase 4.2 — 검색/추천 파이프라인)
-- [ ] 5. `services/book_search.py` (신규) — `books` 인덱스 하이브리드 검색 (BM25 + k-NN)
-- [ ] 6. `services/recommend.py` 전면 재작성
-  - LLM 후보 생성 / 알라딘 검증 / 인메모리 재랭킹 제거
-  - 취향 벡터 = 평점 가중 책 임베딩 + 메모 임베딩 합산
-  - OpenSearch `books` 인덱스 하이브리드 검색으로 후보 추출
-  - LLM은 추천 이유 생성만
-- [ ] 7. `api/recommendations.py` — `/admin/index-books`, `/admin/index-user-books` 엔드포인트 추가
-- [ ] 8. `api/user_books.py` — 평점/메모 변경 시 `user_books` 인덱스 실시간 갱신
+#### 구현 태스크 (Phase 4.2 — 검색/추천 파이프라인) ✅ 완료
+- [x] 5. `services/book_search.py` (신규) — `books` 인덱스 하이브리드 검색 (BM25 + k-NN)
+  - `search_books_hybrid(preference_vector, genre_keywords, exclude_book_ids, k)` — 하이브리드 검색 (폴백: k-NN 단독)
+  - `search_books_cold_start(k)` — 취향 벡터 없을 때 폴백 검색
+- [x] 6. `services/recommend.py` 전면 재작성
+  - LLM 후보 생성 / 알라딘 검증 / 인메모리 재랭킹 / 인메모리 캐시 제거
+  - 취향 벡터 = α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩 (α=0.6)
+  - user_books 인덱스 단일 쿼리로 취향 벡터 계산 (OpenSearch)
+  - books 인덱스 하이브리드 검색으로 후보 추출
+  - is_dirty DB 캐시로 캐시 히트 시 recommendations 테이블 직접 조회
+  - LLM은 추천 이유 생성만 (GPT-4o-mini)
+- [x] 7. `api/recommendations.py` — `/ask` 엔드포인트에서 알라딘 검증 제거
+- [x] 8. `api/user_books.py` — 평점/메모 변경 시 `user_books` 인덱스 실시간 갱신
+  - add: `index_user_book()` 호출
+  - update: `index_user_book()` 호출
+  - delete: `delete_user_book()` 호출
+- [x] `opensearch/index.py` — `ensure_books_index()`에 `_ensure_hybrid_pipeline()` 추가
+- [x] `profile_cache.py` — `update_profile()`, `is_recommendation_fresh()` 함수 추가
 
 #### 구현 태스크 (Phase 4.3 — 앙상블 CF, 데이터 충분 후)
 - [ ] 9. CF 모델 학습 (ALS 또는 LightFM)

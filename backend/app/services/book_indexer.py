@@ -1,7 +1,6 @@
 """book_indexer: books DB → OpenSearch books 인덱스 임베딩/upsert."""
 
 import logging
-import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -69,8 +68,15 @@ async def index_all_books(db: AsyncSession) -> dict:
     failed = 0
     total_tokens = 0
 
+    skipped = 0
     for book in books:
         try:
+            # 이미 인덱싱된 문서는 건너뜀 (OpenAI API 비용 절감)
+            existing = os_client.exists(index=BOOKS_INDEX, id=str(book.id))
+            if existing:
+                skipped += 1
+                continue
+
             embed_input = _build_embed_text(book)
             embedding, tokens = await embed_text(embed_input)
             total_tokens += tokens
@@ -93,10 +99,11 @@ async def index_all_books(db: AsyncSession) -> dict:
             )
             indexed += 1
             logger.info(
-                "[book-indexer] Indexed '%s' (%d/%d)",
+                "[book-indexer] Indexed '%s' (%d/%d, skipped=%d)",
                 book.title,
                 indexed,
                 len(books),
+                skipped,
             )
         except Exception as e:
             failed += 1
@@ -107,18 +114,11 @@ async def index_all_books(db: AsyncSession) -> dict:
             )
 
     logger.info(
-        "[book-indexer] Done: indexed=%d, failed=%d, total_tokens=%d",
+        "[book-indexer] Done: indexed=%d, skipped=%d, failed=%d, total_tokens=%d",
         indexed,
+        skipped,
         failed,
         total_tokens,
     )
-    return {"indexed": indexed, "failed": failed, "total_tokens": total_tokens}
+    return {"indexed": indexed, "skipped": skipped, "failed": failed, "total_tokens": total_tokens}
 
-
-def delete_book_from_index(book_id: uuid.UUID) -> None:
-    """books 인덱스에서 단일 book 문서 삭제."""
-    try:
-        os_client.delete(index=BOOKS_INDEX, id=str(book_id), ignore=[404])
-        logger.info("[book-indexer] Deleted book %s from index", book_id)
-    except Exception as e:
-        logger.error("[book-indexer] Failed to delete book %s: %s", book_id, e)

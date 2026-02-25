@@ -7,7 +7,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
-from datetime import datetime
 
 
 @dataclass
@@ -22,9 +21,6 @@ class Chunk:
 
     metadata: Dict[str, Any]
     """소스별 메타데이터 (book_title, category, author 등)"""
-
-    created_at: Optional[datetime] = None
-    """청크 생성 시간"""
 
     chunk_id: Optional[str] = None
     """내용 기반 SHA256 해시 (OpenSearch 중복 제거용)"""
@@ -69,23 +65,6 @@ class BaseParser(ABC):
             ValueError: 데이터 형식 오류 시
         """
         pass
-
-    @abstractmethod
-    def validate(self, data: Any) -> bool:
-        """
-        입력 데이터의 유효성을 확인합니다.
-
-        Args:
-            data: 검증할 데이터
-
-        Returns:
-            유효성 여부
-        """
-        pass
-
-    def get_stats(self) -> Dict[str, int]:
-        """파싱 통계를 반환합니다."""
-        return self.parse_stats.copy()
 
     def reset_stats(self):
         """파싱 통계를 초기화합니다."""
