@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,6 +11,10 @@ from app.models.user import User
 from app.models.book import Book
 from app.schemas.book import BookCreate, BookResponse, BookSearchResult
 from app.services.aladin import search_books as aladin_search
+from app.services.book_indexer import index_single_book
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/books", tags=["books"])
 
 
@@ -64,6 +69,12 @@ async def select_aladin_book(
     await db.commit()
     await db.refresh(book)
 
+    # 신규 책만 books 인덱스에 자동 인덱싱
+    try:
+        await index_single_book(book)
+    except Exception:
+        logger.warning("[books] Failed to index book '%s' after aladin select, skipping", book.title)
+
     return book
 
 
@@ -94,5 +105,11 @@ async def create_book(
     db.add(book)
     await db.commit()
     await db.refresh(book)
+
+    # books 인덱스에 자동 인덱싱
+    try:
+        await index_single_book(book)
+    except Exception:
+        logger.warning("[books] Failed to index book '%s' after create, skipping", book.title)
 
     return book

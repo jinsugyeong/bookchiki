@@ -7,7 +7,6 @@
 
 import json
 import logging
-from pathlib import Path
 from typing import List, Any, Dict, Optional
 from .base_parser import BaseParser, Chunk
 
@@ -25,12 +24,6 @@ class ThreadReviewsParser(BaseParser):
     def __init__(self):
         """독달 후기 파서 초기화."""
         super().__init__(source_name="thread_reviews")
-
-    def validate(self, data: Any) -> bool:
-        """입력 데이터의 유효성을 확인합니다."""
-        if isinstance(data, str):
-            return data.endswith(".json") and Path(data).exists()
-        return isinstance(data, (list, dict))
 
     def parse(self, data: Any) -> List[Chunk]:
         """

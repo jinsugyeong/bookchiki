@@ -12,7 +12,6 @@ class RecommendationResponse(BaseModel):
     description: str = ""
     genre: str = ""
     cover_image_url: str = ""
-    mood: str = ""
     score: float
     reason: str
 

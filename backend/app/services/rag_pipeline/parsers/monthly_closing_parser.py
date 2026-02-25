@@ -13,7 +13,6 @@
 
 import logging
 import re
-from pathlib import Path
 from typing import List, Any
 from .base_parser import BaseParser, Chunk
 
@@ -31,22 +30,6 @@ class MonthlyClosingParser(BaseParser):
     def __init__(self):
         """월말결산 파서 초기화."""
         super().__init__(source_name="monthly_closing")
-
-    def validate(self, data: Any) -> bool:
-        """
-        입력 데이터의 유효성을 확인합니다.
-
-        Args:
-            data: 파일 경로 (str) 또는 파일 내용 (str)
-
-        Returns:
-            유효성 여부
-        """
-        if isinstance(data, str):
-            if data.endswith(".md"):
-                return Path(data).exists()
-            return "##" in data or "#" in data
-        return False
 
     def parse(self, data: Any) -> List[Chunk]:
         """

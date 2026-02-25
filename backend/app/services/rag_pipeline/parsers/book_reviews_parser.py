@@ -6,7 +6,6 @@
 
 import json
 import logging
-from pathlib import Path
 from typing import List, Any, Dict
 from .base_parser import BaseParser, Chunk
 
@@ -23,26 +22,6 @@ class BookReviewsParser(BaseParser):
     def __init__(self):
         """책 후기 파서 초기화."""
         super().__init__(source_name="reviews")
-        self.review_batch_size = 1  # 한 리뷰당 1개 청크, 필요시 2-3개 배치 가능
-
-    def validate(self, data: Any) -> bool:
-        """
-        입력 데이터의 유효성을 확인합니다.
-
-        Args:
-            data: 파일 경로 (str) 또는 JSON 객체 (list/dict)
-
-        Returns:
-            유효성 여부
-        """
-        if isinstance(data, str):
-            # 파일 경로인 경우
-            if data.endswith(".json"):
-                return Path(data).exists()
-            return False
-        elif isinstance(data, (list, dict)):
-            return True
-        return False
 
     def parse(self, data: Any) -> List[Chunk]:
         """

@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+import re
 from datetime import date
 
 from sqlalchemy import select
@@ -13,9 +14,6 @@ from app.schemas.book_import import ImportResult
 from app.services.aladin import search_books as aladin_search
 
 logger = logging.getLogger(__name__)
-
-
-import re
 
 
 def _clean_title_for_search(title: str) -> str:
@@ -93,7 +91,6 @@ BOOKJUK_COLUMNS = {
     "생성일": "created_date",
     "시작일": "started_at",
     "읽은 날짜": "finished_at",
-    "중단일": "stopped_at",
     "평점": "rating",
     # 추가 매핑 (다른 CSV 형식 호환)
     "ISBN": "isbn",
@@ -149,8 +146,12 @@ async def import_csv(
     file_content: bytes,
     user_id,
     db: AsyncSession,
-) -> ImportResult:
-    """Parse CSV and import books + user_books records."""
+) -> tuple[ImportResult, list[tuple[UserBook, Book]], list[Book]]:
+    """Parse CSV and import books + user_books records.
+
+    Returns:
+        (ImportResult, user_book+book 페어 목록, 신규 생성된 book 목록)
+    """
     text = file_content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
 
@@ -159,6 +160,8 @@ async def import_csv(
     skipped = 0
     failed = 0
     errors: list[str] = []
+    created_pairs: list[tuple[UserBook, Book]] = []  # user_books 인덱싱용
+    new_books: list[Book] = []  # books 인덱싱용 (신규 생성만)
 
     for row_num, row in enumerate(reader, start=2):
         total += 1
@@ -210,9 +213,11 @@ async def import_csv(
                 else:
                     db.add(book)
                     await db.flush()
+                    new_books.append(book)
             else:
                 db.add(book)
                 await db.flush()
+                new_books.append(book)
 
         # Check if user already has this book
         existing_ub = await db.execute(
@@ -236,6 +241,7 @@ async def import_csv(
             source="import",
         )
         db.add(user_book)
+        created_pairs.append((user_book, book))
         created += 1
 
     # Record import history
@@ -247,10 +253,14 @@ async def import_csv(
     db.add(import_record)
     await db.commit()
 
-    return ImportResult(
-        total=total,
-        created=created,
-        skipped=skipped,
-        failed=failed,
-        errors=errors,
+    return (
+        ImportResult(
+            total=total,
+            created=created,
+            skipped=skipped,
+            failed=failed,
+            errors=errors,
+        ),
+        created_pairs,
+        new_books,
     )
