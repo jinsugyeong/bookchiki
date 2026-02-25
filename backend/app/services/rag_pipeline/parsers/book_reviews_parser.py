@@ -1,9 +1,3 @@
-"""
-책 후기 JSON 파서.
-
-/output/book_reviews.json 파일을 파싱하여 책별 리뷰를 청크로 변환합니다.
-"""
-
 import json
 import logging
 from typing import List, Any, Dict

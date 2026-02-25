@@ -137,8 +137,8 @@ recommendations
 
 #### 구현 태스크 ✅ 완료
 - [x] `rag_pipeline/parsers/` — 4개 소스별 파서 (base, recommend, book_reviews, monthly_closing, thread_reviews)
-- [x] `backend/app/services/community_seeder.py` — 파서에서 책 제목 추출 + 알라딘 검증 + books DB 시딩
-- [x] `POST /admin/seed-community-books` — 관리자 시딩 엔드포인트
+- [x] `backend/app/services/data_seeder.py` — 파서에서 책 제목 추출 + 알라딘 검증 + books DB 시딩
+- [x] `POST /admin/seed-books` — 관리자 시딩 엔드포인트
 - [x] `rag_pipeline/pipeline.py` — 전체 청크 임베딩 + `rag_knowledge` 인덱스 적재
 - [x] `backend/app/services/rag.py` — `embed_text()` + `search_knowledge()` (하이브리드 검색)
 - [x] `opensearch/index.py` — `rag_knowledge` 인덱스 매핑 + `ensure_knowledge_index()`
@@ -189,7 +189,7 @@ recommendations
 - [x] `opensearch/index.py` — `ensure_books_index()`에 `_ensure_hybrid_pipeline()` 추가
 - [x] `profile_cache.py` — `update_profile()`, `is_recommendation_fresh()` 함수 추가
 
-#### 구현 태스크 (Phase 4.3 — Synthetic 행렬 + ALS 앙상블 CF)
+#### 구현 태스크 (Phase 4.3 — Synthetic 행렬 + ALS 앙상블 CF) ✅ 완료
 
 > **Netflix/Spotify 방식:** 오프라인 배치 파이프라인에서 학습 → 결과물(추천 점수 보정)만 활용. 프로덕션 DB에 synthetic 흔적 없음.
 
@@ -203,24 +203,34 @@ recommendations
 RAG 데이터(thread_review.json) + DB user_books
     ↓ 책 제목 → book_id 매핑 (books 테이블)
     ↓ Synthetic(41명) + Real 유저 → scipy.sparse user×item 행렬
-    ↓ implicit ALS 학습 (factors=64, iterations=20)
-    ↓ backend/models/cf_model.npz + cf_mapping.npz 저장
+    ↓ implicit ALS 학습 (factors=64, iterations=20, regularization=0.1)
+    ↓ backend/models/cf_model.npz + cf_mapping.json 저장
+
+실행: docker compose exec -w /project backend python scripts/train_cf.py
+옵션: --factors 64 --iterations 20 --regularization 0.1
 ```
 
 **프로덕션 CF 점수 조회 (`backend/app/services/cf_scorer.py`):**
 - 모델 파일 로드 (싱글톤, 없으면 graceful degradation)
-- `get_scores(user_id, book_ids)` → book_id별 CF 점수 dict 반환
+- `get_scores(user_id, book_ids)` → {book_id: 0.0~1.0} min-max 정규화 점수
+- 모델 없거나 유저 미매핑: 빈 dict 반환 (OpenSearch만 사용)
 
 **앙상블 스코어링 (`recommend.py` 업데이트):**
 - `final_score = α × OpenSearch점수 + (1-α) × CF점수`
-- α 동적: 서재 < 10권 → α=0.9, 10-29권 → α=0.7, ≥ 30권 → α=0.5
-- CF 모델 없거나 유저 없으면 α=1.0 (OpenSearch만)
+- α 동적 계산: 서재 < 10권 → α=0.9, 10-29권 → α=0.7, ≥ 30권 → α=0.5
+- CF 모델 없으면 graceful degradation (α=1.0, OpenSearch만)
+
+**모델 파일 관리:**
+- `backend/models/cf_model.npz` — NumPy binary (user_factors, item_factors)
+- `backend/models/cf_mapping.json` — 유저/책 인덱스 매핑 + 메타데이터
+- `.gitignore`에 추가 (Git 미관리, 로컬/CI 생성)
+- 모델 학습 후 `docker compose restart backend` 필요 (싱글톤 재로드)
 
 **구현 태스크:**
 - [x] 9. `requirements.txt`에 `implicit`, `scipy` 추가
 - [x] 10. `scripts/train_cf.py` — Synthetic 행렬 빌드 + ALS 학습 + 모델 저장
 - [x] 11. `backend/app/services/cf_scorer.py` — CF 점수 조회 서비스 (싱글톤)
-- [x] 12. `recommend.py` — CF 앙상블 스코어링 추가
+- [x] 12. `recommend.py` — CF 앙상블 스코어링 추가 (`_compute_ensemble_alpha()`, `_apply_cf_ensemble()`)
 - [x] 13. Alembic 마이그레이션 파일 생성 (390a85298b3d에 user_preference_profiles 포함됨)
 - [x] 14. 단위 테스트 작성 (test_cf_scorer.py, test_recommend_ensemble.py, test_train_cf.py)
 

@@ -1,9 +1,3 @@
-"""
-추천리스트 마크다운 파서.
-
-/output/recommend.md 파일을 파싱하여 카테고리별 책 추천을 청크로 변환합니다.
-"""
-
 import logging
 import re
 from typing import List, Any
@@ -13,12 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 class RecommendParser(BaseParser):
-    """
-    추천리스트 마크다운 파서.
-
-    마크다운 헤더(카테고리)와 테이블(책제목 | 추천사) 형식을 파싱합니다.
-    """
-
     def __init__(self):
         """추천리스트 파서 초기화."""
         super().__init__(source_name="recommend")

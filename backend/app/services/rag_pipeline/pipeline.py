@@ -1,5 +1,5 @@
 """
-RAG 파이프라인: 커뮤니티 데이터 파싱 → 배치 임베딩 → rag_knowledge 적재.
+RAG 파이프라인: 데이터 파싱 → 배치 임베딩 → rag_knowledge 적재.
 
 사용법:
     pipeline = RagPipeline(data_dir=Path("/app/output"))
@@ -54,16 +54,16 @@ def _generate_chunk_id(source: str, text: str) -> str:
 
 
 class RagPipeline:
-    """커뮤니티 데이터를 파싱하여 rag_knowledge 인덱스에 적재하는 파이프라인."""
+    """데이터를 파싱하여 rag_knowledge 인덱스에 적재하는 파이프라인."""
 
     def __init__(self, data_dir: Path = Path("/app/output")):
         """파이프라인 초기화.
 
         Args:
-            data_dir: 커뮤니티 데이터 파일들이 위치한 디렉토리
+            data_dir: 데이터 파일들이 위치한 디렉토리
         """
         self.data_dir = data_dir
-        # monthly_closing은 books 시딩 전용 (community_seeder.py에서 사용)
+        # monthly_closing은 books 시딩 전용 (data_seeder.py에서 사용)
         self.parsers = {
             "recommend": RecommendParser(),
             "reviews": BookReviewsParser(),
