@@ -189,20 +189,47 @@ recommendations
 - [x] `opensearch/index.py` — `ensure_books_index()`에 `_ensure_hybrid_pipeline()` 추가
 - [x] `profile_cache.py` — `update_profile()`, `is_recommendation_fresh()` 함수 추가
 
-#### 구현 태스크 (Phase 4.3 — 앙상블 CF, 데이터 충분 후)
-- [ ] 9. CF 모델 학습 (ALS 또는 LightFM)
-  - 학습 데이터: `user_books` 평점 + 메모 임베딩 + 읽기 상태
-- [ ] 10. 앙상블 스코어링: `α × OpenSearch점수 + (1-α) × CF점수`
-  - α 동적 조절: 서재 책 수 < 10 → α=0.9, ≥ 30 → α=0.5
-- [ ] 11. Alembic 마이그레이션 파일 생성
-- [ ] 12. 통합 테스트 작성
+#### 구현 태스크 (Phase 4.3 — Synthetic 행렬 + ALS 앙상블 CF)
+
+> **Netflix/Spotify 방식:** 오프라인 배치 파이프라인에서 학습 → 결과물(추천 점수 보정)만 활용. 프로덕션 DB에 synthetic 흔적 없음.
+
+**Synthetic 행렬 구성 전략:**
+- `thread_review.json`: 41개 `post_num` → synthetic_user (각 평균 15.6권). 같은 게시글 = 비슷한 취향의 독자 그룹 → implicit CF 신호
+- `book_reviews.json`: 책별 리뷰 수 → popularity confidence 가중치 (선택적)
+- `recommend.md`, `monthly_closing_best.md`: 맥락 태그 / popularity → cold start 보완 (추후 확장)
+
+**오프라인 배치 파이프라인 (`scripts/train_cf.py`):**
+```
+RAG 데이터(thread_review.json) + DB user_books
+    ↓ 책 제목 → book_id 매핑 (books 테이블)
+    ↓ Synthetic(41명) + Real 유저 → scipy.sparse user×item 행렬
+    ↓ implicit ALS 학습 (factors=64, iterations=20)
+    ↓ backend/models/cf_model.npz + cf_mapping.npz 저장
+```
+
+**프로덕션 CF 점수 조회 (`backend/app/services/cf_scorer.py`):**
+- 모델 파일 로드 (싱글톤, 없으면 graceful degradation)
+- `get_scores(user_id, book_ids)` → book_id별 CF 점수 dict 반환
+
+**앙상블 스코어링 (`recommend.py` 업데이트):**
+- `final_score = α × OpenSearch점수 + (1-α) × CF점수`
+- α 동적: 서재 < 10권 → α=0.9, 10-29권 → α=0.7, ≥ 30권 → α=0.5
+- CF 모델 없거나 유저 없으면 α=1.0 (OpenSearch만)
+
+**구현 태스크:**
+- [x] 9. `requirements.txt`에 `implicit`, `scipy` 추가
+- [x] 10. `scripts/train_cf.py` — Synthetic 행렬 빌드 + ALS 학습 + 모델 저장
+- [x] 11. `backend/app/services/cf_scorer.py` — CF 점수 조회 서비스 (싱글톤)
+- [x] 12. `recommend.py` — CF 앙상블 스코어링 추가
+- [x] 13. Alembic 마이그레이션 파일 생성 (390a85298b3d에 user_preference_profiles 포함됨)
+- [x] 14. 단위 테스트 작성 (test_cf_scorer.py, test_recommend_ensemble.py, test_train_cf.py)
 
 
 ### Phase 5 — 프론트엔드 ⏳ 예정
 - [ ] 메인 페이지 (서비스 소개 + 책 추천 시스템 1 + 독서 통계 대시보드 + 책 추천 시스템2(모달))
-- [ ] 내 서재 페이지 (독서 기록 목록, 서재 책 검색, 정렬, 별점/메모 입력)
+- [ ] 내 서재 페이지 (독서 기록 목록, 서재 책 검색, 정렬, 별점/메모/하이라이트 입력)
 - [ ] CSV 임포트 페이지
-- [ ] 이미지 생성 페이지 (책 선택 → 스타일 → 생성 → 텍스트 편집 → 다운로드) **나중에
+- [ ] 이미지 생성 페이지 (책 선택 → 스타일 → 생성 → 텍스트 편집 → 다운로드) **나중에(준비중입니다로 대체)
 - [ ] 마이페이지 (독서 통계, 이미지 히스토리, 내 정보 관리)
 
 ### Phase 6 — 북스타그램 이미지 생성 ⏳ 예정

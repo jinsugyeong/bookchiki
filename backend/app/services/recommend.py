@@ -3,8 +3,9 @@
 1. is_dirty 확인 → 캐시 히트 시 DB 직접 조회
 2. user_books 인덱스에서 취향 벡터 계산 (평점가중 책임베딩 + 메모임베딩)
 3. books 인덱스 하이브리드 검색 (BM25 + k-NN) or cold start
-4. LLM 추천 이유 병렬 생성 (asyncio.gather)
-5. recommendations 테이블 저장 + user_preference_profiles 갱신
+4. CF 앙상블 스코어링 (ALS 모델 있을 때만)
+5. LLM 추천 이유 병렬 생성 (asyncio.gather)
+6. recommendations 테이블 저장 + user_preference_profiles 갱신
 """
 
 import asyncio
@@ -27,6 +28,7 @@ from app.services.profile_cache import (
     update_profile,
     is_recommendation_fresh,
 )
+from app.services.cf_scorer import cf_scorer
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,78 @@ _openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 # 취향 벡터 가중치: α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩
 _BOOK_EMBEDDING_ALPHA = 0.6
 _MEMO_EMBEDDING_ALPHA = 0.4
+
+# CF 앙상블 alpha 기준 (서재 책 수 기반)
+_CF_ALPHA_THRESHOLDS: list[tuple[int, float]] = [
+    (10, 0.9),   # 서재 < 10권 → α=0.9 (OpenSearch 위주)
+    (30, 0.7),   # 서재 10-29권 → α=0.7
+]
+_CF_ALPHA_DEFAULT = 0.5  # 서재 >= 30권
+
+
+# ──────────────────────────────────────────────
+# CF 앙상블 스코어링
+# ──────────────────────────────────────────────
+
+def _compute_ensemble_alpha(book_count: int) -> float:
+    """서재 책 수에 따른 앙상블 alpha 반환.
+
+    alpha가 클수록 OpenSearch 점수에 더 많은 가중치.
+    CF 데이터 부족 시 OpenSearch 위주로 추천.
+    """
+    for threshold, alpha in _CF_ALPHA_THRESHOLDS:
+        if book_count < threshold:
+            return alpha
+    return _CF_ALPHA_DEFAULT
+
+
+def _apply_cf_ensemble(
+    candidates: list[dict],
+    user_id: UUID,
+    book_count: int,
+) -> list[dict]:
+    """CF 점수를 OpenSearch 점수와 앙상블하여 후보 재정렬.
+
+    CF 모델이 없거나 유저가 모델에 없으면 원본 candidates 그대로 반환.
+
+    Args:
+        candidates: OpenSearch 검색 결과 [{"book_id": ..., "score": ..., ...}]
+        user_id: 유저 UUID
+        book_count: 유저의 서재 책 수 (alpha 계산용)
+
+    Returns:
+        CF 점수 반영 후 재정렬된 candidates
+    """
+    if not cf_scorer.is_available():
+        logger.debug("[recommend] CF 모델 없음 → OpenSearch 점수만 사용")
+        return candidates
+
+    candidate_book_ids = [c["book_id"] for c in candidates]
+    cf_scores = cf_scorer.get_scores(user_id, candidate_book_ids)
+
+    if not cf_scores:
+        logger.debug("[recommend] CF 매핑 없음 (user=%s) → OpenSearch 점수만 사용", user_id)
+        return candidates
+
+    alpha = _compute_ensemble_alpha(book_count)
+    logger.info(
+        "[recommend] CF 앙상블: user=%s books=%d alpha=%.2f cf_matched=%d/%d",
+        user_id,
+        book_count,
+        alpha,
+        len(cf_scores),
+        len(candidates),
+    )
+
+    updated = []
+    for c in candidates:
+        os_score = c.get("score", 0.0)
+        cf_score = cf_scores.get(c["book_id"], 0.0)
+        ensemble_score = alpha * os_score + (1 - alpha) * cf_score
+        updated.append({**c, "score": round(ensemble_score, 6)})
+
+    updated.sort(key=lambda x: x["score"], reverse=True)
+    return updated
 
 
 # ──────────────────────────────────────────────
@@ -105,20 +179,28 @@ async def _compute_preference_vector(
 # ──────────────────────────────────────────────
 
 def _build_profile_data(user_books: list[UserBook]) -> dict:
-    """로드된 user_books에서 profile_data 구성 (장르, 평점 통계 등).
+    """로드된 user_books에서 profile_data 구성 (장르, 작가, 평점 통계 등).
 
     Returns:
-        { preferred_genres, disliked_genres, preference_summary,
-          top_rated_books, reading_count }
+        { preferred_genres, preferred_authors, disliked_genres,
+          preference_summary, top_rated_books, reading_count }
     """
     genre_counter: Counter[str] = Counter()
+    author_counter: Counter[str] = Counter()
+
     for ub in user_books:
-        if ub.book and ub.book.genre:
+        if not ub.book:
+            continue
+        if ub.book.genre:
             last_genre = ub.book.genre.split(">")[-1].strip()
             if last_genre:
                 genre_counter[last_genre] += 1
+        # 평점 4점 이상 작가만 선호 작가로 집계
+        if ub.book.author and ub.rating and ub.rating >= 4:
+            author_counter[ub.book.author] += 1
 
     preferred_genres = [g for g, _ in genre_counter.most_common(5)]
+    preferred_authors = [a for a, _ in author_counter.most_common(3)]
 
     rated = [ub for ub in user_books if ub.rating is not None and ub.book]
     rated.sort(key=lambda x: x.rating or 0, reverse=True)
@@ -129,6 +211,7 @@ def _build_profile_data(user_books: list[UserBook]) -> dict:
 
     return {
         "preferred_genres": preferred_genres,
+        "preferred_authors": preferred_authors,
         "disliked_genres": [],
         "preference_summary": "",
         "top_rated_books": top_rated_books,
@@ -222,6 +305,7 @@ async def generate_recommendation_reason(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.7,
+            timeout=10.0,
         )
         return response.choices[0].message.content.strip()
     except Exception:
@@ -239,13 +323,14 @@ async def get_recommendations(
     limit: int = 10,
     force_refresh: bool = False,
 ) -> list[dict]:
-    """OpenSearch 하이브리드 검색 기반 추천 파이프라인.
+    """OpenSearch 하이브리드 검색 + CF 앙상블 기반 추천 파이프라인.
 
     1. is_dirty 확인 → 캐시 히트 시 DB 직접 조회
     2. user_books 인덱스에서 취향 벡터 계산
     3. books 인덱스 하이브리드 검색 (or cold start 폴백)
-    4. LLM 추천 이유 asyncio.gather로 병렬 생성 (DB 트랜잭션 외부)
-    5. 기존 추천 삭제 + 새 추천 저장 + 프로필 갱신 (단일 트랜잭션)
+    4. CF 앙상블 스코어링 (모델 있을 때만)
+    5. LLM 추천 이유 asyncio.gather로 병렬 생성 (DB 트랜잭션 외부)
+    6. 기존 추천 삭제 + 새 추천 저장 + 프로필 갱신 (단일 트랜잭션)
     """
     # 1. 캐시 확인 (is_dirty 플래그)
     if not force_refresh:
@@ -282,6 +367,7 @@ async def get_recommendations(
         candidates = await search_books_hybrid(
             preference_vector=preference_vector,
             genre_keywords=profile_data.get("preferred_genres", []),
+            author_keywords=profile_data.get("preferred_authors", []),
             exclude_book_ids=exclude_book_ids,
             k=limit,
         )
@@ -293,7 +379,10 @@ async def get_recommendations(
         logger.info("[recommend] No candidates found, returning empty")
         return []
 
-    # 6. LLM 추천 이유 병렬 생성 (DB 트랜잭션 외부 — 실패해도 기존 데이터 안전)
+    # 6. CF 앙상블 스코어링 (모델 있을 때만 적용)
+    candidates = _apply_cf_ensemble(candidates, user_id, len(user_books))
+
+    # 7. LLM 추천 이유 병렬 생성 (DB 트랜잭션 외부 — 실패해도 기존 데이터 안전)
     user_summary = _build_user_summary(user_books)
     user_preferences = ", ".join(profile_data.get("preferred_genres", []))
 
@@ -302,7 +391,7 @@ async def get_recommendations(
         for c in candidates
     ])
 
-    # 7. 기존 추천 삭제 + 새 추천 저장 + 프로필 갱신 (단일 트랜잭션)
+    # 8. 기존 추천 삭제 + 새 추천 저장 + 프로필 갱신 (단일 트랜잭션)
     try:
         await db.execute(
             delete(Recommendation).where(Recommendation.user_id == user_id)

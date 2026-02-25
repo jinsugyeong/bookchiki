@@ -13,10 +13,8 @@ services:
       opensearch:
         condition: service_healthy
     volumes:
-      - ./backend:/app
-      - ./output:/app/output   # 데이터 마운트
-      - ./scripts:/app/scripts # 백업/유틸 스크립트 마운트
-      - ./backups:/app/backups # 백업 파일 저장 경로
+      - ./backend:/app      # 백엔드 코드 핫 리로드
+      - .:/project          # 프로젝트 루트 (scripts, output, backups 접근용)
 
   postgres:
     image: postgres:16-alpine

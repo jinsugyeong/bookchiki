@@ -5,9 +5,13 @@ rag_knowledge OpenSearch 인덱스 전체를 JSON 파일로 백업.
 복원 시 OpenAI 재임베딩 없이 그대로 적재 가능.
 
 사용법:
+    # Docker 컨테이너 내부에서 실행 (권장, /project 마운트 기준)
+    docker compose exec -w /project backend python scripts/backup_rag_knowledge.py
+    docker compose exec -w /project backend python scripts/backup_rag_knowledge.py --index books
+
+    # 호스트에서 직접 실행
     python scripts/backup_rag_knowledge.py
     python scripts/backup_rag_knowledge.py --output /path/to/backup.json
-    python scripts/backup_rag_knowledge.py --index books
 """
 
 import argparse
@@ -18,13 +22,11 @@ from datetime import datetime
 from pathlib import Path
 
 # backend 패키지 경로 추가
-# Docker 내부: /app/scripts → parent = /app (app/ 패키지가 바로 있음)
-# 호스트: /repo/scripts → parent.parent/backend = /repo/backend
+# Docker: /project/scripts → parent/backend = /project/backend (app/ 패키지 위치)
+# 호스트: C:/JSG/bookchiki/scripts → parent/backend = C:/JSG/bookchiki/backend
 SCRIPT_DIR = Path(__file__).resolve().parent
-_docker_path = SCRIPT_DIR.parent          # /app (Docker)
-_host_path = SCRIPT_DIR.parent.parent / "backend"  # /repo/backend (host)
-sys.path.insert(0, str(_docker_path))
-sys.path.insert(0, str(_host_path))
+BACKEND_DIR = SCRIPT_DIR.parent / "backend"
+sys.path.insert(0, str(BACKEND_DIR))
 
 logging.basicConfig(
     level=logging.INFO,

@@ -5,9 +5,13 @@ backup_rag_knowledge.py로 생성한 JSON 덤프 파일을 읽어
 임베딩 벡터 포함 그대로 OpenSearch에 재적재합니다.
 
 사용법:
+    # Docker 컨테이너 내부에서 실행 (권장, /project 마운트 기준)
+    docker compose exec -w /project backend python scripts/restore_rag_knowledge.py --input backups/rag_knowledge_20250222_120000.json
+    docker compose exec -w /project backend python scripts/restore_rag_knowledge.py --input backup.json --clear
+
+    # 호스트에서 직접 실행
     python scripts/restore_rag_knowledge.py --input backups/rag_knowledge_20250222_120000.json
     python scripts/restore_rag_knowledge.py --input /path/to/backup.json --index rag_knowledge
-    python scripts/restore_rag_knowledge.py --input backup.json --clear  # 기존 인덱스 초기화 후 복원
 """
 
 import argparse
@@ -17,13 +21,11 @@ import sys
 from pathlib import Path
 
 # backend 패키지 경로 추가
-# Docker 내부: /app/scripts → parent = /app (app/ 패키지가 바로 있음)
-# 호스트: /repo/scripts → parent.parent/backend = /repo/backend
+# Docker: /project/scripts → parent/backend = /project/backend (app/ 패키지 위치)
+# 호스트: C:/JSG/bookchiki/scripts → parent/backend = C:/JSG/bookchiki/backend
 SCRIPT_DIR = Path(__file__).resolve().parent
-_docker_path = SCRIPT_DIR.parent          # /app (Docker)
-_host_path = SCRIPT_DIR.parent.parent / "backend"  # /repo/backend (host)
-sys.path.insert(0, str(_docker_path))
-sys.path.insert(0, str(_host_path))
+BACKEND_DIR = SCRIPT_DIR.parent / "backend"
+sys.path.insert(0, str(BACKEND_DIR))
 
 logging.basicConfig(
     level=logging.INFO,

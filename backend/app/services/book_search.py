@@ -16,6 +16,7 @@ async def search_books_hybrid(
     genre_keywords: list[str],
     exclude_book_ids: list[str],
     k: int = 10,
+    author_keywords: list[str] | None = None,
 ) -> list[dict]:
     """books 인덱스에서 하이브리드 검색 (BM25 + k-NN).
 
@@ -24,29 +25,42 @@ async def search_books_hybrid(
         genre_keywords: BM25 검색용 장르 키워드 목록
         exclude_book_ids: 이미 서재에 있는 book_id 목록 (제외용)
         k: 반환할 최대 결과 수
+        author_keywords: BM25 검색용 선호 작가 목록 (4점 이상 작가)
 
     Returns:
         [{"book_id", "title", "author", "genre", "description",
           "isbn", "cover_image_url", "score"}] 리스트
     """
-    fetch_size = k * 3  # 제외 필터링 후 k개 확보 여유분
+    # 서재 책 수 + k*2 여유분: 제외 후에도 k개 확보
+    fetch_size = len(exclude_book_ids) + k * 2
 
-    # BM25 쿼리: 장르 키워드를 genre + description 필드에서 검색
+    # BM25 쿼리: 장르 + 작가 키워드를 should 절로 구성
+    should_clauses = []
     if genre_keywords:
-        genre_query = {
-            "bool": {
-                "should": [
-                    {"terms": {"genre": genre_keywords, "boost": 1.5}},
-                    {
-                        "multi_match": {
-                            "query": " ".join(genre_keywords),
-                            "fields": ["description", "title"],
-                            "type": "best_fields",
-                        }
-                    },
-                ]
+        should_clauses += [
+            {"terms": {"genre": genre_keywords, "boost": 1.5}},
+            {
+                "multi_match": {
+                    "query": " ".join(genre_keywords),
+                    "fields": ["description", "title"],
+                    "type": "best_fields",
+                }
+            },
+        ]
+    if author_keywords:
+        should_clauses.append(
+            {
+                "multi_match": {
+                    "query": " ".join(author_keywords),
+                    "fields": ["author"],
+                    "type": "best_fields",
+                    "boost": 1.2,
+                }
             }
-        }
+        )
+
+    if should_clauses:
+        genre_query = {"bool": {"should": should_clauses}}
     else:
         genre_query = {"match_all": {}}
 
@@ -110,10 +124,11 @@ async def search_books_hybrid(
             break
 
     logger.info(
-        "[book-search] Hybrid search: %d results (k=%d, genres=%s, excluded=%d)",
+        "[book-search] Hybrid search: %d results (k=%d, genres=%s, authors=%s, excluded=%d)",
         len(results),
         k,
         genre_keywords[:3],
+        (author_keywords or [])[:3],
         len(exclude_book_ids),
     )
     return results

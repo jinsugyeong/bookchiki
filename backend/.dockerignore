@@ -5,15 +5,25 @@
 Dockerfile
 *.md
 *.yml
-*.json
 *.csv
 *.ipynb
 .env
 .env.example
 /output
 /scripts
+/backups
+/docs
+/logs
 /venv
 .claude
+/.claude
 .DS_Store
 Thumbs.db
-/backups
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+
+# CF 모델 바이너리 (런타임 생성 아티팩트)
+models/*.npz

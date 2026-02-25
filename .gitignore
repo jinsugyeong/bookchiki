@@ -36,6 +36,9 @@ CLAUDE.md
 /output
 /backups
 
+# CF 모델 바이너리
+backend/models
+
 # log
 /logs
 /log
@@ -44,3 +47,4 @@ CLAUDE.md
 # test용
 *.ipynb
 requirements.txt
+.pytest_cache/

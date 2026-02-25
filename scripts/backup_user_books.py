@@ -5,6 +5,10 @@ user_books OpenSearch 인덱스 전체를 JSON 파일로 백업.
 복원 시 OpenAI 재임베딩 없이 그대로 적재 가능.
 
 사용법:
+    # Docker 컨테이너 내부에서 실행 (권장, /project 마운트 기준)
+    docker compose exec -w /project backend python scripts/backup_user_books.py
+
+    # 호스트에서 직접 실행
     python scripts/backup_user_books.py
     python scripts/backup_user_books.py --output /path/to/backup.json
 """
@@ -16,8 +20,9 @@ from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR.parent))
-sys.path.insert(0, str(SCRIPT_DIR.parent.parent / "backend"))
+BACKEND_DIR = SCRIPT_DIR.parent / "backend"
+sys.path.insert(0, str(SCRIPT_DIR))        # scripts/ (backup_rag_knowledge 임포트용)
+sys.path.insert(0, str(BACKEND_DIR))
 
 logging.basicConfig(
     level=logging.INFO,
