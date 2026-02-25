@@ -168,9 +168,9 @@ def _build_profile_context(profile_data: dict) -> str:
 def _build_rag_context(chunks: list[dict]) -> str:
     """RAG 검색 청크 목록을 LLM 컨텍스트 문자열로 변환."""
     if not chunks:
-        return "관련 커뮤니티 정보 없음"
+        return "관련 정보 없음"
 
-    lines = ["## 커뮤니티 추천 및 후기 참고 자료"]
+    lines = ["## 추천 및 후기 참고 자료"]
     for i, chunk in enumerate(chunks[:7], 1):
         lines.append(f"{i}. {chunk['text'][:200]}")
 
@@ -190,7 +190,7 @@ async def _ask_llm(
     """
     system_prompt = (
         "당신은 한국 독서 추천 전문가입니다. "
-        "사용자의 취향 프로필과 커뮤니티 추천 자료를 참고하여 "
+        "사용자의 취향 프로필과 추천 자료를 참고하여 "
         "사용자의 질문에 맞는 책을 추천해주세요.\n\n"
         f"## 사용자 취향 프로필\n{profile_context}\n\n"
         f"{rag_context}\n\n"
@@ -239,7 +239,7 @@ admin_router = APIRouter(prefix="/admin", tags=["admin"])
 async def index_knowledge_base(
     current_user: User = Depends(get_current_user),
 ):
-    """rag_knowledge 인덱스: 커뮤니티 데이터를 파싱하여 임베딩 적재 (관리자).
+    """rag_knowledge 인덱스: 데이터를 파싱하여 임베딩 적재 (관리자).
 
     /app/output 디렉토리의 파일을 읽어 rag_knowledge 인덱스에 청크 적재.
     OpenAI API 과금이 발생합니다.
@@ -315,21 +315,21 @@ async def index_user_books(
     )
 
 
-@admin_router.post("/seed-community-books", response_model=SeedStatusResponse)
-async def seed_community_books(
+@admin_router.post("/seed-books", response_model=SeedStatusResponse)
+async def seed_books(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """커뮤니티 데이터에서 책 제목을 추출하여 books DB에 시딩 (관리자).
+    """데이터에서 책 제목을 추출하여 books DB에 시딩 (관리자).
 
     알라딘 API로 실존 검증 후 DB에 저장.
     """
-    from app.services.community_seeder import seed_books_from_community
+    from app.services.data_seeder import seed_books_from_data
 
-    result = await seed_books_from_community(db, data_dir=Path("/app/output"))
+    result = await seed_books_from_data(db, data_dir=Path("/app/output"))
 
     logger.info(
-        "[admin] seed-community-books: total=%d seeded=%d skipped=%d errors=%d",
+        "[admin] seed-books: total=%d seeded=%d skipped=%d errors=%d",
         result.total, result.seeded, result.skipped, result.errors,
     )
 

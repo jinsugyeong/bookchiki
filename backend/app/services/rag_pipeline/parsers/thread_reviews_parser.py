@@ -1,10 +1,3 @@
-"""
-독달 후기 댓글 JSON 파서.
-
-/output/thread_review.json 파일을 파싱합니다.
-각 레코드는 cmt_id, post_num, title, author, text, page, created_at 필드를 가집니다.
-"""
-
 import json
 import logging
 from typing import List, Any, Dict, Optional
@@ -15,14 +8,14 @@ logger = logging.getLogger(__name__)
 
 class ThreadReviewsParser(BaseParser):
     """
-    독달 후기 댓글 파서.
+    후기 댓글 파서.
 
     thread_review.json의 각 레코드에서 title, author, text 필드를 직접 사용하여
     "책: {title}\n후기: {text}" 형태의 청크를 생성합니다.
     """
 
     def __init__(self):
-        """독달 후기 파서 초기화."""
+        """후기 파서 초기화."""
         super().__init__(source_name="thread_reviews")
 
     def parse(self, data: Any) -> List[Chunk]:

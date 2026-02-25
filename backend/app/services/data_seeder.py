@@ -1,5 +1,5 @@
 """
-커뮤니티 데이터에서 책 제목을 추출하여 books DB에 시딩.
+데이터에서 책 제목을 추출하여 books DB에 시딩.
 
 파이프라인:
   1. 파서별 book_title 추출 + 파서 내 퍼지 중복 제거
@@ -52,13 +52,13 @@ SOURCE_FILES = {
 }
 
 # 로그 파일 경로 (output 볼륨에 저장 → 로컬에서 바로 확인 가능)
-_LOG_FILE = Path("/app/output/community_seeder.log")
+_LOG_FILE = Path("/app/output/data_seeder.log")
 
 
 def _setup_file_logger() -> None:
-    """community_seeder 전용 파일 로거 설정.
+    """data_seeder 전용 파일 로거 설정.
 
-    /app/output/community_seeder.log 에 DEBUG 레벨로 기록.
+    /app/output/data_seeder.log 에 DEBUG 레벨로 기록.
     중복 핸들러 방지: FileHandler가 이미 있으면 스킵.
     """
     if any(isinstance(h, logging.FileHandler) for h in logger.handlers):
@@ -73,15 +73,15 @@ def _setup_file_logger() -> None:
         logger.addHandler(fh)
         logger.setLevel(logging.DEBUG)
     except Exception as e:
-        logger.warning("[community-seeder] 파일 로거 설정 실패: %s", e)
+        logger.warning("[data-seeder] 파일 로거 설정 실패: %s", e)
 
 
 _setup_file_logger()
 
 
 @dataclass
-class CommunitySeedResult:
-    """커뮤니티 시딩 결과."""
+class DataSeedResult:
+    """데이터 시딩 결과."""
     total: int = 0       # 알라딘 검증 대상 고유 제목 수
     seeded: int = 0      # DB에 새로 저장된 책 수
     skipped: int = 0     # 이미 존재하거나 검증 실패한 책 수
@@ -335,24 +335,24 @@ async def _validate_and_fetch(title: str, semaphore: asyncio.Semaphore):
     return None
 
 
-async def seed_books_from_community(
+async def seed_books_from_data(
     db: AsyncSession,
     data_dir: Path = Path("/app/output"),
-) -> CommunitySeedResult:
-    """커뮤니티 데이터에서 책을 추출하여 books DB에 시딩.
+) -> DataSeedResult:
+    """데이터에서 책을 추출하여 books DB에 시딩.
 
     Args:
         db: 비동기 DB 세션
-        data_dir: 커뮤니티 데이터 파일 경로
+        data_dir: 데이터 파일 경로
 
     Returns:
-        CommunitySeedResult (total, seeded, skipped, errors)
+        DataSeedResult (total, seeded, skipped, errors)
     """
     logger.info("=" * 60)
-    logger.info("[seed] 커뮤니티 시딩 시작  (log: %s)", _LOG_FILE)
+    logger.info("[seed] 데이터 시딩 시작  (log: %s)", _LOG_FILE)
     logger.info("=" * 60)
 
-    result = CommunitySeedResult()
+    result = DataSeedResult()
 
     # 1단계: 파서별 추출 + 파서 내 중복 제거
     per_parser = _extract_titles_per_parser(data_dir)
@@ -429,12 +429,6 @@ async def seed_books_from_community(
             logger.info("[save] ✗ 제목+저자 중복: '%s' / %s", item.title, item.author)
             result.skipped += 1
             continue
-
-        # description 없으면 스킵 (임베딩 품질 보장)
-        #if not item.description:
-        #    logger.info("[save] ✗ description 없음: '%s'", item.title)
-        #    result.skipped += 1
-        #    continue
 
         try:
             book = Book(

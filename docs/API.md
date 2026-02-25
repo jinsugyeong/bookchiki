@@ -481,9 +481,14 @@ GET /recommendations?limit=10
    - `α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩` (α=0.6)
 3. 선호 장르 키워드 추출
 4. `books` OpenSearch 인덱스 하이브리드 검색 (BM25 + k-NN), 서재에 있는 책 제외
-5. 최종 N권 `recommendations` 테이블 저장
-6. `user_preference_profiles` 갱신 (`is_dirty=false`, `profile_data`, `preference_vector`)
-7. GPT-4o-mini로 추천 이유 생성
+5. **CF 앙상블 스코어링** (Phase 4.3)
+   - ALS 협업 필터링 모델에서 후보 도서 점수 조회
+   - 최종 점수 = `α_ensemble × OpenSearch점수 + (1-α_ensemble) × CF점수`
+   - α_ensemble 동적 조절: 서재 < 10권 → 0.9, 10-29권 → 0.7, ≥ 30권 → 0.5
+   - CF 모델 없으면 원본 OpenSearch 점수 유지 (graceful degradation)
+6. 최종 N권 `recommendations` 테이블 저장
+7. `user_preference_profiles` 갱신 (`is_dirty=false`, `profile_data`, `preference_vector`)
+8. GPT-4o-mini로 추천 이유 생성
 
 **주의:** Cold start(평점/메모 없음) 사용자는 `books` 인덱스에서 description 기준 폴백 검색으로 추천됩니다.
 
@@ -637,7 +642,7 @@ curl -X POST http://localhost:8000/imports/csv \
 
 ## 관리자 (Admin)
 
-### POST `/admin/seed-community-books`
+### POST `/admin/seed-books`
 
 외부 도서 데이터를 파싱하여 도서 데이터베이스에 시딩합니다.
 
@@ -646,7 +651,7 @@ curl -X POST http://localhost:8000/imports/csv \
 ```json
 {
   "total_books_seeded": 450,
-  "message": "Successfully seeded 450 books from community data."
+  "message": "Successfully seeded 450 books from data."
 }
 ```
 

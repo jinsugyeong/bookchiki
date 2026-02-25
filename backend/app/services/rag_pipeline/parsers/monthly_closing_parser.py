@@ -1,16 +1,3 @@
-"""
-월말결산 마크다운 파서.
-
-/output/monthly_closing_best.md 파일을 파싱하여 월별 순위를 청크로 변환합니다.
-
-실제 파일 포맷:
-    # 2025-11
-    2025-11          ← 헤더 반복 라인 (무시)
-    3 연매장          ← 횟수 책제목
-    2 제노사이드
-    1 개구리
-"""
-
 import logging
 import re
 from typing import List, Any
@@ -20,13 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 class MonthlyClosingParser(BaseParser):
-    """
-    월말결산 마크다운 파서.
-
-    월별 책 순위와 언급 횟수 데이터를 파싱합니다.
-    실제 포맷: # YYYY-MM 헤더 + "횟수 책제목" 라인
-    """
-
     def __init__(self):
         """월말결산 파서 초기화."""
         super().__init__(source_name="monthly_closing")

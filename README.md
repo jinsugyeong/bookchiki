@@ -25,7 +25,7 @@
 
 ### 시스템 1 — 기록 기반 개인화 추천
 
-DB 영속 취향 프로필 (`user_preference_profiles`) + `is_dirty` 이벤트 기반 캐시로 즉시 응답.
+DB 영속 취향 프로필 (`user_preference_profiles`) + `is_dirty` 이벤트 기반 캐시 + CF 앙상블로 즉시 응답.
 
 ```
 GET /recommendations
@@ -37,12 +37,21 @@ false           true
 캐시 히트        파이프라인 실행
 (~10ms)         ├─ 취향 벡터 계산 (평점 가중 임베딩 + 메모 임베딩)
                 ├─ OpenSearch books 인덱스 하이브리드 검색 (BM25 + KNN)
+                ├─ CF 앙상블 스코어링 (ALS 모델 있을 때만)
+                │   └─ 최종 점수 = α × OpenSearch + (1-α) × CF
+                │      (α는 서재 책 수에 따라 동적 조절)
                 ├─ 최종 N권 DB 저장
                 ├─ user_preference_profiles 갱신 (is_dirty=false)
                 └─ 추천 이유 생성 (GPT-4o-mini)
 ```
 
 **Dirty 마킹 트리거:** 책 추가 / 평점·메모·상태 변경 / 책 삭제 / CSV 임포트
+
+**CF 앙상블 규칙:**
+- 서재 < 10권 → α=0.9 (콘텐츠 위주)
+- 서재 10-29권 → α=0.7 (균형)
+- 서재 ≥ 30권 → α=0.5 (CF 비중 증가)
+- CF 모델 없으면 graceful degradation (OpenSearch만 사용)
 
 ### 시스템 2 — 자연어 질문 기반 맞춤 추천
 
@@ -72,12 +81,25 @@ docker compose up
 
 # 3. DB + 인덱스 초기화 (최초 1회 또는 리셋 시)
 cd backend && python reset_db.py
+
+# 4. (선택) CF 모델 학습 (충분한 데이터 후)
+#    - 데이터: output/thread_review.json + DB user_books
+#    - 모델 저장: backend/models/cf_model.npz, cf_mapping.json
+docker compose exec -w /project backend python scripts/train_cf.py
+# 옵션: --factors 64 --iterations 20 --regularization 0.1
+
+# 5. (선택) CF 모델 로드 (backend 재시작)
+docker compose restart backend
 ```
 
 - Swagger UI: http://localhost:8000/docs
 - Health 체크: http://localhost:8000/health
 
 **개발 모드 인증 우회:** `APP_ENV=development` 상태에서 Bearer 토큰 없이 요청하면 `dev@bookchiki.local` 사용자 자동 생성.
+
+**추천 시스템 모드:**
+- **CF 모델 없을 때:** OpenSearch 하이브리드 검색만 사용 (graceful degradation)
+- **CF 모델 있을 때:** OpenSearch + CF 앙상블로 점수 보정 (서재 데이터량에 따라 가중치 조절)
 
 ## 주요 API
 
@@ -91,7 +113,7 @@ cd backend && python reset_db.py
 | `GET /recommendations/profile` | 취향 프로필 조회 |
 | `POST /recommendations/refresh` | 강제 추천 재생성 |
 | `POST /imports/csv` | CSV 임포트 |
-| `POST /admin/seed-community-books` | 초기 도서 데이터 시딩 (관리자) |
+| `POST /admin/seed-books` | 초기 도서 데이터 시딩 (관리자) |
 | `POST /admin/index-books` | books → OpenSearch 인덱싱 (관리자) |
 | `POST /admin/index-user-books` | 평점/메모 → OpenSearch 인덱싱 (관리자) |
 
@@ -107,11 +129,13 @@ bookchiki/
 │   │   │   ├── aladin.py           # 알라딘 API 클라이언트
 │   │   │   ├── book_import.py      # CSV 파싱
 │   │   │   ├── rag.py              # 임베딩 + 하이브리드 검색
-│   │   │   ├── recommend.py        # 추천 파이프라인 (기록 기반)
+│   │   │   ├── recommend.py        # 추천 파이프라인 (기록 기반 + CF 앙상블)
+│   │   │   ├── cf_scorer.py        # CF 점수 조회 서비스 (싱글톤)
 │   │   │   ├── profile_cache.py    # 취향 프로필 캐시 관리
 │   │   │   ├── book_indexer.py     # books → OpenSearch 인덱서
 │   │   │   ├── user_book_indexer.py # 평점/메모 → OpenSearch 인덱서
-│   │   │   └── book_search.py      # OpenSearch 하이브리드 검색
+│   │   │   ├── book_search.py      # OpenSearch 하이브리드 검색
+│   │   │   └── data_seeder.py      # 데이터 시딩 파이프라인
 │   │   ├── opensearch/     # 인덱스 매핑 관리
 │   │   └── core/           # 설정, DB, 인증
 │   └── .env.example
