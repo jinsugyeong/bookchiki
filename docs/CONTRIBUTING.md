@@ -1,6 +1,6 @@
 # 개발 가이드
 
-마지막 업데이트: 2026-02-22
+마지막 업데이트: 2026-03-01 (Phase 5 프론트엔드 완료)
 
 이 문서는 Bookchiki 프로젝트의 개발 환경 세팅, 실행 방법, 그리고 테스트 방법을 설명합니다.
 
@@ -9,6 +9,7 @@
 ## 개발 환경 요구사항
 
 - **Python:** 3.10 이상
+- **Node.js:** 20 이상 (프론트엔드용)
 - **PostgreSQL:** 16 (Docker 또는 로컬 설치)
 - **OpenSearch:** 2.0 이상 (Docker)
 - **Docker & Docker Compose:** (권장) 로컬 서비스 실행용
@@ -84,9 +85,20 @@ docker compose up
 ```
 
 상태 확인:
+- **프론트엔드:** http://localhost:3000 (Next.js)
 - **백엔드:** http://localhost:8000 (API 문서: http://localhost:8000/docs)
 - **PostgreSQL:** localhost:5432
 - **OpenSearch:** http://localhost:9200
+
+### 프론트엔드만 로컬 개발 서버 실행
+
+```bash
+cd frontend
+npm install  # 처음 1회
+npm run dev  # 개발 서버 시작 → http://localhost:3000
+```
+
+**주의:** 백엔드가 http://localhost:8000에서 실행 중이어야 합니다. `frontend/.env.local`에서 `NEXT_PUBLIC_API_URL` 확인.
 
 ### 로컬에서 백엔드만 실행
 
@@ -184,34 +196,75 @@ curl http://localhost:8000/recommendations
 
 | 목적 | 커맨드 |
 |------|--------|
-| 전체 서비스 시작 | `docker compose up` |
+| 전체 서비스 시작 (Docker) | `docker compose up` |
 | 서비스 중지 | `docker compose down` |
 | 데이터 전체 초기화 | `cd backend && python reset_db.py` |
 | 백엔드 로컬 실행 | `cd backend && uvicorn app.main:app --reload` |
+| 프론트엔드 개발 서버 | `cd frontend && npm run dev` |
 | API 문서 조회 | http://localhost:8000/docs |
 | 마이그레이션 생성 | `cd backend && alembic revision --autogenerate -m "..."` |
 | 마이그레이션 적용 | `cd backend && alembic upgrade head` |
+| CF 모델 학습 | `docker compose exec -w /project backend python scripts/train_cf.py` |
+| 단위 테스트 | `docker compose exec backend pytest tests/ -v` |
 
 ---
 
 ## 폴더 구조
 
 ```
-backend/
-├── app/
-│   ├── api/              # FastAPI 라우터 (auth, books, user_books, etc.)
-│   ├── models/           # SQLAlchemy ORM 모델
-│   ├── schemas/          # Pydantic 요청/응답 스키마
-│   ├── services/         # 비즈니스 로직 (recommend, rag, aladin, etc.)
-│   ├── core/
-│   │   ├── config.py     # 환경변수 로드
-│   │   ├── database.py   # DB 연결
-│   │   └── security.py   # 인증/JWT
-│   ├── main.py           # FastAPI 앱 진입점
-│   └── __init__.py
-├── requirements.txt      # Python 의존성
-├── Dockerfile
-└── .env.example          # 환경변수 템플릿
+bookchiki/
+├── backend/
+│   ├── app/
+│   │   ├── api/              # FastAPI 라우터 (auth, books, user_books, recommendations, etc.)
+│   │   ├── models/           # SQLAlchemy ORM 모델
+│   │   ├── schemas/          # Pydantic 요청/응답 스키마
+│   │   ├── services/         # 비즈니스 로직 (recommend, rag, aladin, cf_scorer, book_indexer, etc.)
+│   │   ├── opensearch/       # OpenSearch 연동
+│   │   ├── core/
+│   │   │   ├── config.py     # 환경변수 로드
+│   │   │   ├── database.py   # DB 연결
+│   │   │   └── security.py   # 인증/JWT
+│   │   └── main.py           # FastAPI 앱 진입점
+│   ├── models/               # CF 모델 저장소 (cf_model.npz, cf_mapping.json)
+│   ├── alembic/              # DB 마이그레이션
+│   ├── requirements.txt      # Python 의존성
+│   ├── Dockerfile
+│   └── .env.example          # 환경변수 템플릿
+│
+├── frontend/                 # Phase 5: Next.js 15 + Tailwind v4
+│   ├── app/
+│   │   ├── page.tsx          # 홈 페이지
+│   │   ├── layout.tsx        # 메인 레이아웃
+│   │   ├── (auth)/           # 인증 라우트
+│   │   │   └── login/
+│   │   ├── library/          # 내 서재 + 책 검색
+│   │   ├── recommendations/  # 추천 (시스템1, 시스템2)
+│   │   └── mypage/           # 마이페이지
+│   ├── components/           # UI 컴포넌트
+│   ├── hooks/               # React 훅
+│   ├── services/            # API 클라이언트
+│   ├── Dockerfile
+│   ├── tailwind.config.ts
+│   ├── package.json
+│   └── .env.local           # 환경변수 (NEXT_PUBLIC_API_URL)
+│
+├── scripts/                  # 헬퍼 스크립트
+│   ├── train_cf.py          # CF 모델 학습
+│   └── ...
+│
+├── docs/                     # 문서
+│   ├── plan.md              # 개발 계획 (Phase 1~6)
+│   ├── INDEX.md             # 문서 인덱스
+│   ├── API.md               # API 엔드포인트
+│   ├── ENV.md               # 환경변수
+│   ├── CONTRIBUTING.md      # 개발 가이드
+│   └── recommendation-profile-cache-design.md
+│
+├── docker-compose.yml       # 로컬 개발용 (백엔드 + 프론트엔드 + PostgreSQL + OpenSearch)
+├── .dockerignore
+├── .gitignore
+├── .env.example
+└── CLAUDE.md                # 프로젝트 개요 및 아키텍처
 
 ```
 

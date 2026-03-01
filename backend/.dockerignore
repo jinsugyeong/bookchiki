@@ -8,13 +8,14 @@ Dockerfile
 *.csv
 *.ipynb
 .env
-.env.example
+.env*
 /output
 /scripts
 /backups
 /docs
 /logs
 /venv
+/frontend
 .claude
 /.claude
 .DS_Store

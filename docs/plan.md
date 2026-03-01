@@ -235,12 +235,27 @@ RAG 데이터(thread_review.json) + DB user_books
 - [x] 14. 단위 테스트 작성 (test_cf_scorer.py, test_recommend_ensemble.py, test_train_cf.py)
 
 
-### Phase 5 — 프론트엔드 ⏳ 예정
-- [ ] 메인 페이지 (서비스 소개 + 책 추천 시스템 1 + 독서 통계 대시보드 + 책 추천 시스템2(모달))
-- [ ] 내 서재 페이지 (독서 기록 목록, 서재 책 검색, 정렬, 별점/메모/하이라이트 입력)
-- [ ] CSV 임포트 페이지
-- [ ] 이미지 생성 페이지 (책 선택 → 스타일 → 생성 → 텍스트 편집 → 다운로드) **나중에(준비중입니다로 대체)
-- [ ] 마이페이지 (독서 통계, 이미지 히스토리, 내 정보 관리)
+### Phase 5 — 프론트엔드 ✅ 완료
+
+**기술 스택:** Next.js 15 + Tailwind v4 + TanStack Query v5 + Lucide React
+**디자인:** Soft Modern (크림 베이지 배경 `#FFFDF9`, 주력 텍스트 `#1C1917`, 앰버 액센트 `#E8A045`)
+**폰트:** Pretendard (CDN, 한국어 sans-serif)
+**배포:** `frontend/Dockerfile` + Docker Compose (포트 3000)
+
+#### 완료된 페이지/기능
+- [x] **홈 (`/`)**: 랜딩 페이지 (HeroSection, FeaturesSection, DashboardSection, LibrarySection, AISection, MypageSection, CTASection)
+- [x] **책 검색 (`/library/search`)**: 알라딘 API 검색 + 서재 추가 모달 + 추가 취소 기능
+- [x] **내 서재 (`/library`)**: 책 목록, 상태별 필터(읽는중/완료/찜), 책 상세/편집 모달, 평점/메모/상태 수정
+- [x] **추천 (`/recommendations`)**: 시스템1(취향 기반 `GET /recommendations`) + 시스템2(질문 기반 `POST /recommendations/ask`) 탭
+- [x] **마이페이지 (`/mypage`)**: 프로필, 통계, CSV 임포트, 계정 관리
+- [x] **로그인 (`/login`)**: Google OAuth
+
+#### 구현 세부 사항
+- [x] 백엔드는 Docker (`docker compose up`), 프론트엔드는 별도 실행 (`npm run dev`)
+- [x] 파비콘 동적 생성 (`app/icon.tsx`, 헤더 로고와 동일)
+- [x] `.gitignore` 통합 (frontend/.gitignore → 루트로 병합)
+- [x] 환경 변수 설정 (`NEXT_PUBLIC_API_URL=http://localhost:8000`)
+- [x] API 통합 (TanStack Query v5로 자동 캐싱/리페칭)
 
 ### Phase 6 — 북스타그램 이미지 생성 ⏳ 예정
 
@@ -280,21 +295,46 @@ project-root/
 │   │   ├── api/          # FastAPI 라우터
 │   │   ├── models/       # SQLAlchemy 모델
 │   │   ├── services/     # 비즈니스 로직
-│   │   │   ├── agent.py       # AI Agent
-│   │   │   ├── rag.py         # RAG 파이프라인
-│   │   │   ├── recommend.py   # 추천 시스템
-│   │   │   ├── image_gen.py   # 이미지 생성
-│   │   │   ├── image_editor.py # 이미지 텍스트 편집 + 버전 관리
-│   │   │   └── book_import.py  # 외부 앱 데이터 임포트
+│   │   │   ├── aladin.py        # 알라딘 API 클라이언트
+│   │   │   ├── rag.py           # RAG 파이프라인 (OpenAI 임베딩)
+│   │   │   ├── recommend.py     # 추천 시스템 (OpenSearch 하이브리드 + CF 앙상블)
+│   │   │   ├── cf_scorer.py     # CF 협업 필터링 점수 조회
+│   │   │   ├── book_search.py   # OpenSearch 검색
+│   │   │   ├── book_indexer.py  # books 인덱싱
+│   │   │   ├── user_book_indexer.py # user_books 인덱싱
+│   │   │   ├── profile_cache.py # 취향 프로필 캐시
+│   │   │   ├── book_import.py   # CSV 임포트
+│   │   │   └── data_seeder.py   # 도서 데이터 시딩
 │   │   ├── opensearch/   # OpenSearch 연동
 │   │   └── core/         # 설정, 인증
+│   ├── models/           # CF 모델 저장소 (cf_model.npz, cf_mapping.json)
+│   ├── alembic/          # DB 마이그레이션
 │   ├── Dockerfile
 │   └── requirements.txt
-├── frontend/
+├── frontend/             # Next.js 15 앱 (Phase 5 완료)
 │   ├── app/
-│   ├── components/
+│   │   ├── page.tsx      # 홈 페이지
+│   │   ├── layout.tsx    # 메인 레이아웃
+│   │   ├── (auth)/
+│   │   │   └── login/    # Google OAuth 로그인
+│   │   ├── library/      # 내 서재 + 책 검색
+│   │   ├── recommendations/  # 추천 (시스템1, 시스템2)
+│   │   └── mypage/       # 마이페이지
+│   ├── components/       # UI 컴포넌트
+│   ├── hooks/           # React 훅
+│   ├── services/        # API 클라이언트
+│   ├── tailwind.config.ts
+│   └── package.json
+├── scripts/
+│   ├── train_cf.py      # CF 모델 학습
 │   └── ...
-└── docker-compose.yml    # 로컬 개발용
+├── .dockerignore
+├── docker-compose.yml   # 로컬 개발용 (백엔드 + PostgreSQL + OpenSearch + 프론트엔드)
+├── .gitignore
+├── .env.example
+└── docs/
+    ├── plan.md
+    └── ...
 ```
 
 ---

@@ -17,8 +17,8 @@
 | 검색/벡터 | OpenSearch 2.17 (하이브리드 BM25 + KNN) |
 | AI/ML | OpenAI API (GPT-4o-mini, text-embedding-3-small) |
 | 도서 데이터 | 알라딘 TTB API |
-| 프론트엔드 | Next.js App Router (예정) |
-| 배포 | AWS EC2 + RDS + OpenSearch / Vercel (프론트) |
+| 프론트엔드 | Next.js 15 + Tailwind v4 + TanStack Query v5 (완료) |
+| 배포 | Docker Compose (개발) / AWS EC2 + RDS + OpenSearch / Vercel (프론트) |
 | 인증 | Google OAuth 2.0 + JWT |
 
 ## 추천 시스템
@@ -71,29 +71,33 @@ rag_knowledge 인덱스에서 관련 정보 하이브리드 검색 (BM25 + KNN)
 
 ## 빠른 시작
 
+### 환경 설정
+
 ```bash
-# 1. 환경 설정
 cd backend && cp .env.example .env
 # .env: OPENAI_API_KEY, ALADIN_API_KEY, JWT_SECRET_KEY 필수 입력
-
-# 2. 실행 (백엔드 :8000 · PostgreSQL :5432 · OpenSearch :9200)
-docker compose up
-
-# 3. DB + 인덱스 초기화 (최초 1회 또는 리셋 시)
-cd backend && python reset_db.py
-
-# 4. (선택) CF 모델 학습 (충분한 데이터 후)
-#    - 데이터: output/thread_review.json + DB user_books
-#    - 모델 저장: backend/models/cf_model.npz, cf_mapping.json
-docker compose exec -w /project backend python scripts/train_cf.py
-# 옵션: --factors 64 --iterations 20 --regularization 0.1
-
-# 5. (선택) CF 모델 로드 (backend 재시작)
-docker compose restart backend
 ```
 
-- Swagger UI: http://localhost:8000/docs
-- Health 체크: http://localhost:8000/health
+```bash
+# 1. 백엔드 + DB (Docker) — :8000 · :5432 · :9200
+docker compose up
+
+# 2. 프론트엔드 (별도 터미널) — :3000
+cd frontend && npm install  # 처음 1회
+cd frontend && npm run dev
+
+# 3. (처음에만) DB + 인덱스 초기화
+cd backend && python reset_db.py
+
+# 4. (선택) CF 모델 학습
+docker compose exec -w /project backend python scripts/train_cf.py
+```
+
+### 서비스 접속
+
+- **앱:** http://localhost:3000
+- **API 문서:** http://localhost:8000/docs
+- **Health 체크:** http://localhost:8000/health
 
 **개발 모드 인증 우회:** `APP_ENV=development` 상태에서 Bearer 토큰 없이 요청하면 `dev@bookchiki.local` 사용자 자동 생성.
 
@@ -138,10 +142,36 @@ bookchiki/
 │   │   │   └── data_seeder.py      # 데이터 시딩 파이프라인
 │   │   ├── opensearch/     # 인덱스 매핑 관리
 │   │   └── core/           # 설정, DB, 인증
+│   ├── models/             # CF 모델 저장소 (cf_model.npz, cf_mapping.json)
+│   ├── alembic/            # DB 마이그레이션
+│   ├── Dockerfile
 │   └── .env.example
+│
+├── frontend/               # Phase 5: Next.js 15 + Tailwind v4
+│   ├── app/                # Next.js App Router
+│   │   ├── page.tsx        # 홈 페이지
+│   │   ├── (auth)/         # 로그인 페이지
+│   │   ├── library/        # 내 서재 + 책 검색
+│   │   ├── recommendations/ # 추천
+│   │   └── mypage/         # 마이페이지
+│   ├── components/         # UI 컴포넌트
+│   ├── hooks/             # React 훅
+│   ├── services/          # API 클라이언트
+│   ├── tailwind.config.ts
+│   ├── package.json
+│   └── .env.local
+│
+├── scripts/               # 헬퍼 스크립트 (CF 학습 등)
 ├── docker-compose.yml
-├── docs/plan.md            # 개발 로드맵
-└── CLAUDE.md               # Claude Code 작업 가이드
+├── docs/
+│   ├── plan.md            # 개발 로드맵 (Phase 1~6)
+│   ├── INDEX.md           # 문서 인덱스
+│   ├── API.md             # API 엔드포인트
+│   ├── ENV.md             # 환경변수
+│   ├── CONTRIBUTING.md    # 개발 가이드
+│   └── recommendation-profile-cache-design.md
+├── CLAUDE.md              # Claude Code 작업 가이드
+└── README.md              # 이 파일
 ```
 
 
