@@ -70,3 +70,10 @@ async def google_login(code: str, db: AsyncSession = Depends(get_db)):
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current authenticated user."""
     return UserResponse.model_validate(current_user)
+
+
+@router.delete("/me", status_code=204)
+async def delete_me(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """현재 로그인한 사용자 계정과 모든 관련 데이터를 삭제한다."""
+    await db.delete(current_user)
+    await db.commit()
