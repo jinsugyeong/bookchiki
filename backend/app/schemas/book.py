@@ -11,6 +11,7 @@ class BookCreate(BaseModel):
     description: str | None = None
     cover_image_url: str | None = None
     genre: str | None = None
+    publisher: str | None = None
     published_at: date | None = None
 
 
@@ -22,6 +23,7 @@ class BookResponse(BaseModel):
     description: str | None = None
     cover_image_url: str | None = None
     genre: str | None = None
+    publisher: str | None = None
     published_at: date | None = None
     created_at: datetime
 

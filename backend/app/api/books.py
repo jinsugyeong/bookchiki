@@ -63,6 +63,7 @@ async def select_aladin_book(
         description=book_data.description,
         cover_image_url=(book_data.cover_image_url or "")[:500],
         genre=(book_data.genre or "")[:500],
+        publisher=(book_data.publisher or "")[:200] or None,
         published_at=book_data.published_at,
     )
     db.add(book)
