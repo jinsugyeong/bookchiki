@@ -18,6 +18,7 @@ class Book(Base):
     description: Mapped[str | None] = mapped_column(Text)
     cover_image_url: Mapped[str | None] = mapped_column(String(500))
     genre: Mapped[str | None] = mapped_column(String(500))
+    publisher: Mapped[str | None] = mapped_column(String(200))
     published_at: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

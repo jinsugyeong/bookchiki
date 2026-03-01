@@ -1,6 +1,6 @@
 # 문서 인덱스
 
-마지막 업데이트: 2026-02-25 (Phase 4 추천 시스템 재설계 — OpenSearch 하이브리드 검색 기반 전환)
+마지막 업데이트: 2026-03-01 (Phase 5 프론트엔드 완료 — Next.js 15 + Tailwind v4 + TanStack Query v5)
 
 Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다.
 
@@ -103,7 +103,23 @@ Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다
 
 ---
 
-### 추천 기능 개발 (Phase 4 재설계 진행 중)
+### 프론트엔드 개발 (Phase 5 완료)
+
+1. **[프론트엔드 개발 시작](./frontend-guide.md)** (있으면 참고)
+2. 프론트엔드 구조: `frontend/` — Next.js 15, Tailwind v4, TanStack Query v5
+3. 개발 서버: `cd frontend && npm run dev` → http://localhost:3000
+4. 주요 페이지:
+   - `/` (홈)
+   - `/login` (Google OAuth)
+   - `/library` (내 서재)
+   - `/library/search` (책 검색)
+   - `/recommendations` (추천)
+   - `/mypage` (마이페이지)
+5. API 통합: `frontend/services/api-client.ts`로 백엔드와 자동 통신
+
+---
+
+### 추천 기능 개발 (Phase 4 완료, Phase 5 구현됨)
 
 1. **[recommendation-profile-cache-design.md](./recommendation-profile-cache-design.md)** — 캐시 아키텍처 설계
 2. **[CLAUDE.md](../CLAUDE.md)** — 추천 파이프라인 섹션 정독

@@ -37,6 +37,7 @@ class AskResultItem(BaseModel):
     isbn: str = ""
     cover_image_url: str = ""
     genre: str = ""
+    description: str = ""
 
 
 class AskResponse(BaseModel):
