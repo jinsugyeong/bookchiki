@@ -9,10 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.core.config import settings
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
+from app.models.book import Book
 from app.schemas.recommendation import (
     RecommendationListResponse,
     RecommendationResponse,
@@ -96,17 +99,20 @@ async def ask_recommendations(
     if not suggestions_raw:
         return AskResponse(results=[], total=0, question=request.question)
 
-    results = [
-        AskResultItem(
-            title=item.get("title", ""),
-            author=item.get("author", ""),
+    results = []
+    for item in suggestions_raw[: request.limit]:
+        title = item.get("title", "")
+        author = item.get("author", "")
+        book_info = await _find_book_info(db, title)
+        results.append(AskResultItem(
+            title=title,
+            author=author,
             reason=item.get("reason_hint", ""),
             isbn="",
-            cover_image_url="",
-            genre="",
-        )
-        for item in suggestions_raw[: request.limit]
-    ]
+            cover_image_url=book_info["cover_image_url"],
+            genre=book_info["genre"],
+            description=book_info["description"],
+        ))
 
     logger.info(
         "[ask] user=%s question='%s' results=%d",
@@ -128,6 +134,26 @@ async def get_preference_profile(
         is_dirty=profile.is_dirty,
         updated_at=profile.updated_at,
     )
+
+
+async def _find_book_info(db: AsyncSession, title: str) -> dict:
+    """제목으로 books 테이블에서 표지 이미지 URL, 설명, 장르 조회."""
+    empty = {"cover_image_url": "", "description": "", "genre": ""}
+    if not title:
+        return empty
+    result = await db.execute(
+        select(Book.cover_image_url, Book.description, Book.genre).where(
+            Book.title.ilike(f"%{title}%")
+        ).limit(1)
+    )
+    row = result.one_or_none()
+    if not row:
+        return empty
+    return {
+        "cover_image_url": row.cover_image_url or "",
+        "description": row.description or "",
+        "genre": row.genre or "",
+    }
 
 
 def _to_response(r: dict) -> RecommendationResponse:
