@@ -16,7 +16,8 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET_KEY: str | None = None
     JWT_ALGORITHM: str | None = None
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # OpenSearch
     OPENSEARCH_HOST: str = "opensearch"

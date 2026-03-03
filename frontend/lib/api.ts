@@ -10,7 +10,7 @@ import type {
   Highlight,
 } from "./types";
 
-/** API 클라이언트 — 개발 환경에서는 JWT 없이도 동작 */
+/** API 클라이언트 */
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
   headers: {
@@ -18,7 +18,7 @@ const api = axios.create({
   },
 });
 
-/** 로컬 스토리지에서 토큰 읽어서 헤더에 주입 */
+/** 로컬 스토리지에서 access_token 읽어서 Authorization 헤더에 주입 */
 api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("access_token");
@@ -28,6 +28,87 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+/** 401 응답 시 refresh_token으로 access_token 재발급 후 원래 요청 재시도 */
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (v: unknown) => void; reject: (e: unknown) => void }> = [];
+
+function processQueue(error: unknown, token: string | null) {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) {
+      reject(error);
+    } else {
+      resolve(token);
+    }
+  });
+  failedQueue = [];
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    // refresh 엔드포인트 자체가 실패한 경우 루프 방지
+    if (originalRequest.url?.includes("/auth/refresh") || originalRequest.url?.includes("/auth/logout")) {
+      return Promise.reject(error);
+    }
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      const refreshToken = typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null;
+
+      if (!refreshToken) {
+        isRefreshing = false;
+        _clearAuthAndRedirect();
+        return Promise.reject(error);
+      }
+
+      try {
+        const { data } = await api.post("/auth/refresh", { refresh_token: refreshToken });
+        const newAccessToken: string = data.access_token;
+
+        if (typeof window !== "undefined") {
+          localStorage.setItem("access_token", newAccessToken);
+        }
+
+        api.defaults.headers.common["Authorization"] = `Bearer ${newAccessToken}`;
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+
+        processQueue(null, newAccessToken);
+        return api(originalRequest);
+      } catch (refreshError) {
+        processQueue(refreshError, null);
+        _clearAuthAndRedirect();
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+/** 로컬 스토리지 토큰 삭제 후 로그인 페이지로 이동 */
+function _clearAuthAndRedirect() {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    window.location.href = "/login";
+  }
+}
 
 // ── 인증 ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +122,17 @@ export const getMe = async () => {
 export const loginWithGoogle = async (code: string) => {
   const { data } = await api.post(`/auth/google?code=${encodeURIComponent(code)}`);
   return data;
+};
+
+/** Refresh Token으로 새 Access Token 발급 */
+export const refreshAccessToken = async (refreshToken: string): Promise<string> => {
+  const { data } = await api.post("/auth/refresh", { refresh_token: refreshToken });
+  return data.access_token;
+};
+
+/** 로그아웃 — Refresh Token 서버 폐기 */
+export const logoutApi = async (refreshToken: string): Promise<void> => {
+  await api.post("/auth/logout", { refresh_token: refreshToken });
 };
 
 /** 계정 탈퇴 (모든 데이터 삭제) */

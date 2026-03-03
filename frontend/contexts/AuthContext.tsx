@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import api from "@/lib/api";
+import api, { logoutApi } from "@/lib/api";
 
 interface AuthUser {
   id: string;
@@ -14,7 +14,7 @@ interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
-  login: (token: string, user: AuthUser) => void;
+  login: (accessToken: string, refreshToken: string, user: AuthUser) => void;
   logout: () => void;
 }
 
@@ -25,7 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  /** 앱 시작 시 저장된 토큰으로 유저 정보 복원 */
+  /** 앱 시작 시 저장된 access_token으로 유저 정보 복원 */
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
@@ -35,17 +35,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api
       .get("/auth/me")
       .then(({ data }) => setUser(data))
-      .catch(() => localStorage.removeItem("access_token"))
+      .catch(() => {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+      })
       .finally(() => setIsLoading(false));
   }, []);
 
-  const login = useCallback((token: string, userData: AuthUser) => {
-    localStorage.setItem("access_token", token);
+  const login = useCallback((accessToken: string, refreshToken: string, userData: AuthUser) => {
+    localStorage.setItem("access_token", accessToken);
+    localStorage.setItem("refresh_token", refreshToken);
     setUser(userData);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (refreshToken) {
+      try {
+        await logoutApi(refreshToken);
+      } catch {
+        // 서버 폐기 실패해도 로컬 정리는 진행
+      }
+    }
     localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
     setUser(null);
     router.push("/");
   }, [router]);
