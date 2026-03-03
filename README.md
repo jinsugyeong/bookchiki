@@ -99,7 +99,11 @@ docker compose exec -w /project backend python scripts/train_cf.py
 - **API 문서:** http://localhost:8000/docs
 - **Health 체크:** http://localhost:8000/health
 
-**개발 모드 인증 우회:** `APP_ENV=development` 상태에서 Bearer 토큰 없이 요청하면 `dev@bookchiki.local` 사용자 자동 생성.
+**인증 방식:**
+- Google OAuth 2.0 기반 로그인
+- JWT Access Token (기본 60분 만료) + Refresh Token (기본 7일 만료)
+- Refresh Token은 DB 저장 및 로그아웃 시 자동 폐기
+- 개발 중에도 실제 Google OAuth 요구 (우회 없음)
 
 **추천 시스템 모드:**
 - **CF 모델 없을 때:** OpenSearch 하이브리드 검색만 사용 (graceful degradation)
@@ -130,47 +134,46 @@ bookchiki/
 │   │   ├── api/            # FastAPI 라우터
 │   │   ├── models/         # SQLAlchemy ORM
 │   │   ├── services/
-│   │   │   ├── aladin.py           # 알라딘 API 클라이언트
-│   │   │   ├── book_import.py      # CSV 파싱
-│   │   │   ├── rag.py              # 임베딩 + 하이브리드 검색
-│   │   │   ├── recommend.py        # 추천 파이프라인 (기록 기반 + CF 앙상블)
-│   │   │   ├── cf_scorer.py        # CF 점수 조회 서비스 (싱글톤)
-│   │   │   ├── profile_cache.py    # 취향 프로필 캐시 관리
-│   │   │   ├── book_indexer.py     # books → OpenSearch 인덱서
+│   │   │   ├── aladin.py            # 알라딘 API 클라이언트
+│   │   │   ├── book_import.py       # CSV 파싱
+│   │   │   ├── rag.py               # 임베딩 + 하이브리드 검색
+│   │   │   ├── recommend.py         # 추천 파이프라인 (기록 기반 + CF 앙상블)
+│   │   │   ├── cf_scorer.py         # CF 점수 조회 서비스 (싱글톤)
+│   │   │   ├── profile_cache.py     # 취향 프로필 캐시 관리
+│   │   │   ├── book_indexer.py      # books → OpenSearch 인덱서
 │   │   │   ├── user_book_indexer.py # 평점/메모 → OpenSearch 인덱서
-│   │   │   ├── book_search.py      # OpenSearch 하이브리드 검색
-│   │   │   └── data_seeder.py      # 데이터 시딩 파이프라인
+│   │   │   ├── book_search.py       # OpenSearch 하이브리드 검색
+│   │   │   └── data_seeder.py       # 데이터 시딩 파이프라인
 │   │   ├── opensearch/     # 인덱스 매핑 관리
 │   │   └── core/           # 설정, DB, 인증
 │   ├── models/             # CF 모델 저장소 (cf_model.npz, cf_mapping.json)
 │   ├── alembic/            # DB 마이그레이션
-│   ├── Dockerfile
-│   └── .env.example
+│   └── Dockerfile
 │
-├── frontend/               # Phase 5: Next.js 15 + Tailwind v4
-│   ├── app/                # Next.js App Router
-│   │   ├── page.tsx        # 홈 페이지
-│   │   ├── (auth)/         # 로그인 페이지
-│   │   ├── library/        # 내 서재 + 책 검색
+├── frontend/               
+│   ├── app/                 # Next.js App Router
+│   │   ├── page.tsx         # 홈 페이지
+│   │   ├── (auth)/          # 로그인 페이지
+│   │   ├── library/         # 내 서재 + 책 검색
 │   │   ├── recommendations/ # 추천
-│   │   └── mypage/         # 마이페이지
-│   ├── components/         # UI 컴포넌트
-│   ├── hooks/             # React 훅
-│   ├── services/          # API 클라이언트
-│   ├── tailwind.config.ts
+│   │   └── mypage/          # 마이페이지
+│   ├── components/          # UI 컴포넌트
+│   ├── hooks/               # React 훅
+│   ├── services/            # API 클라이언트
+│   ├── tailwind.config.ts   # Tailwind v4
 │   ├── package.json
 │   └── .env.local
 │
-├── scripts/               # 헬퍼 스크립트 (CF 학습 등)
-├── docker-compose.yml
+├── scripts/               # 헬퍼 스크립트 (CF 학습, Data Backup 등)
 ├── docs/
 │   ├── plan.md            # 개발 로드맵 (Phase 1~6)
 │   ├── INDEX.md           # 문서 인덱스
 │   ├── API.md             # API 엔드포인트
 │   ├── ENV.md             # 환경변수
-│   ├── CONTRIBUTING.md    # 개발 가이드
-│   └── recommendation-profile-cache-design.md
-├── CLAUDE.md              # Claude Code 작업 가이드
+│   └── CONTRIBUTING.md    # 개발 가이드
+│
+├── docker-compose.yml
+├── .env.example
 └── README.md              # 이 파일
 ```
 
@@ -183,13 +186,11 @@ bookchiki/
 | `OPENAI_API_KEY` | ✅ | GPT-4o-mini + 임베딩 |
 | `ALADIN_API_KEY` | ✅ | 도서 검색/검증 |
 | `JWT_SECRET_KEY` | ✅ | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `OPENSEARCH_HOST` | — | 기본값 `opensearch` (Docker) |
-| `APP_ENV` | — | `development` (인증 우회) / `production` |
-| `GOOGLE_CLIENT_ID/SECRET` | — | OAuth (프로덕션만 필수) |
-| `FRONTEND_URL` | — | CORS 허용 URL |
+| `OPENSEARCH_HOST` |  | 기본값 `opensearch` (Docker) |
+| `GOOGLE_CLIENT_ID/SECRET` |  | OAuth (프로덕션만 필수) |
+| `FRONTEND_URL` |  | CORS 허용 URL |
 
 ## 주의사항
 
 - **DB/인덱스 리셋** — 모든 데이터 삭제. 반드시 확인 후 진행
 - **API 키** — `.env` 파일을 절대 커밋하지 말 것
-- **개발 모드** — `APP_ENV=development`일 때만 인증 우회 활성화

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스
 
-마지막 업데이트: 2026-02-22
+마지막 업데이트: 2026-03-03
 
 이 문서는 `backend/.env` 파일의 모든 환경변수를 설명합니다.
 
@@ -35,6 +35,7 @@
 |---------|------|--------|------|
 | `JWT_ALGORITHM` | JWT 서명 알고리즘 | `HS256` | String |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | 액세스 토큰 만료 시간 | `60` | Integer |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh Token 만료 시간 | `7` | Integer |
 | `OPENSEARCH_HOST` | OpenSearch 호스트 | `localhost` | String |
 | `OPENSEARCH_PORT` | OpenSearch 포트 | `9200` | Integer |
 | `OPENAI_EMBEDDING_MODEL` | OpenAI 임베딩 모델 | `text-embedding-3-small` | String |
@@ -56,18 +57,18 @@
 
 ## 개발 환경 팁
 
-### 개발 환경에서 Google OAuth 우회
+### 개발 환경에서 Google OAuth 설정
 
-Google OAuth 없이 개발하려면:
+모든 환경에서 실제 Google OAuth를 사용합니다. 개발 환경에서 Google 계정 없이 테스트하려면:
 
 ```bash
 # .env에 설정
-APP_ENV=development
 GOOGLE_CLIENT_ID=dummy
 GOOGLE_CLIENT_SECRET=dummy
+APP_ENV=development
 ```
 
-이 경우 `/auth` 엔드포인트 없이도 `GET /recommendations` 등의 요청이 `dev@bookchiki.local` 사용자로 자동 인증됩니다.
+이 경우 Google 로그인 대신 프론트엔드의 테스트 모드나 API 문서(Swagger UI)에서 직접 토큰을 입력할 수 있습니다.
 
 ### 로컬 OpenSearch 사용
 

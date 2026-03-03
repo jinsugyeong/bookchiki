@@ -1,6 +1,6 @@
 # 개발 가이드
 
-마지막 업데이트: 2026-03-01 (Phase 5 프론트엔드 완료)
+마지막 업데이트: 2026-03-03 (Phase 5 프론트엔드 완료 + Refresh Token 구현)
 
 이 문서는 Bookchiki 프로젝트의 개발 환경 세팅, 실행 방법, 그리고 테스트 방법을 설명합니다.
 
@@ -85,7 +85,7 @@ docker compose up
 ```
 
 상태 확인:
-- **프론트엔드:** http://localhost:3000 (Next.js)
+- **프론트엔드:** http://localhost:3000 (Next.js + Tailwind v4)
 - **백엔드:** http://localhost:8000 (API 문서: http://localhost:8000/docs)
 - **PostgreSQL:** localhost:5432
 - **OpenSearch:** http://localhost:9200
@@ -99,6 +99,15 @@ npm run dev  # 개발 서버 시작 → http://localhost:3000
 ```
 
 **주의:** 백엔드가 http://localhost:8000에서 실행 중이어야 합니다. `frontend/.env.local`에서 `NEXT_PUBLIC_API_URL` 확인.
+
+**프론트엔드 페이지:**
+- `/` — 홈 (비회원 랜딩 + 회원 홈 페이지 + 통계)
+- `/login` — Google OAuth 로그인 페이지
+- `/auth/callback` — OAuth 콜백 (자동 리다이렉트)
+- `/library` — 내 서재 (책 목록 + 통계)
+- `/library/search` — 도서 검색 (알라딘 API 검색)
+- `/recommendations` — 추천 탭 (시스템 1: 기록 기반 + 시스템 2: 질문 기반)
+- `/mypage` — 마이페이지 (프로필 정보)
 
 ### 로컬에서 백엔드만 실행
 
@@ -169,26 +178,38 @@ API 엔드포인트 상세 목록은 [API.md](./API.md) 참고.
 
 ## 테스트
 
-현재 테스트 코드는 없습니다. 향후 작성 예정입니다.
+현재 백엔드 테스트 코드는 일부 작성되어 있습니다. (`backend/tests/`)
 
-**테스트 작성 시 기준:**
-- 최소 80% 코드 커버리지
+**테스트 실행:**
+```bash
+docker compose exec backend pytest tests/ -v
+```
+
+**테스트 작성 기준:**
+- 최소 80% 코드 커버리지 목표
 - Unit, Integration, E2E 테스트 포함
+- TDD(테스트 주도 개발) 권장
 
 ---
 
-## 개발 환경 인증 우회
+## 인증 및 Refresh Token
 
-`APP_ENV=development`일 때, Bearer 토큰 없이 API를 호출하면 자동으로 `dev@bookchiki.local` 사용자가 생성/사용됩니다.
+모든 환경(개발/프로덕션)에서 **실제 Google OAuth + JWT 인증**을 사용합니다.
 
-예시:
+**토큰 관리:**
+- **Access Token:** 기본 만료 60분 (환경변수로 조정 가능)
+- **Refresh Token:** 기본 만료 7일 (환경변수로 조정 가능)
+- **Refresh Token 저장:** PostgreSQL `refresh_tokens` 테이블
+- **로그아웃:** Refresh Token 자동 폐기
 
+**개발 중 Google OAuth 없이 테스트하려면:**
+`.env`에 다음을 설정:
 ```bash
-# 토큰 없이 추천 요청
-curl http://localhost:8000/recommendations
-
-# 결과: dev@bookchiki.local 사용자의 추천 반환
+GOOGLE_CLIENT_ID=dummy
+GOOGLE_CLIENT_SECRET=dummy
 ```
+
+API 문서(Swagger UI)에서 "Authorize" 버튼으로 토큰을 직접 입력하거나, 프론트엔드 로그인 화면에서 Google 계정으로 로그인하세요.
 
 ---
 

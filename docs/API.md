@@ -1,6 +1,6 @@
 # API 엔드포인트 레퍼런스
 
-마지막 업데이트: 2026-02-25 (Phase 4 추천 시스템 재설계 — OpenSearch 하이브리드 검색 기반으로 전환)
+마지막 업데이트: 2026-03-03 (Refresh Token 구현 + 로그아웃 기능 완료)
 
 이 문서는 Bookchiki 백엔드의 모든 API 엔드포인트를 설명합니다.
 
@@ -9,8 +9,8 @@
 ## 기본 정보
 
 - **Base URL:** `http://localhost:8000` (로컬 개발)
-- **인증:** Bearer JWT 토큰 (대부분의 엔드포인트)
-- **개발 환경:** `APP_ENV=development`일 때 Bearer 토큰 없이 요청 가능 (자동으로 `dev@bookchiki.local` 사용자 생성)
+- **인증:** Bearer JWT 액세스 토큰 (대부분의 엔드포인트)
+- **토큰 만료:** 액세스 토큰 기본 60분, Refresh Token 기본 7일
 - **응답 형식:** JSON
 
 ---
@@ -19,7 +19,7 @@
 
 ### POST `/auth/google`
 
-Google OAuth 인증 코드를 JWT 액세스 토큰으로 교환합니다.
+Google OAuth 인증 코드를 JWT 액세스 토큰 + Refresh Token으로 교환합니다.
 
 **요청:**
 
@@ -34,6 +34,7 @@ Google OAuth 인증 코드를 JWT 액세스 토큰으로 교환합니다.
 ```json
 {
   "access_token": "eyJhbGc...",
+  "refresh_token": "uuid-token-string",
   "token_type": "bearer",
   "user": {
     "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -44,13 +45,53 @@ Google OAuth 인증 코드를 JWT 액세스 토큰으로 교환합니다.
 }
 ```
 
-**주의:** 개발 환경에서는 이 엔드포인트를 사용할 필요 없습니다. Bearer 토큰 없이 다른 API를 호출하면 자동으로 인증됩니다.
+**동작:**
+- Google OAuth 코드를 Google API와 교환
+- 신규 사용자면 DB에 생성, 기존 사용자면 조회
+- Access Token (60분 기본) + Refresh Token (7일 기본) 발급
+- Refresh Token은 `refresh_tokens` 테이블에 저장
+
+---
+
+### POST `/auth/refresh`
+
+Refresh Token으로 새 Access Token을 발급받습니다.
+
+**요청:**
+
+```json
+{
+  "refresh_token": "uuid-token-string"
+}
+```
+
+**응답 (200):**
+
+```json
+{
+  "access_token": "eyJhbGc...",
+  "token_type": "bearer"
+}
+```
+
+**동작:**
+- Refresh Token 유효성 검증 (DB 확인 + 만료 시간 확인)
+- 새 Access Token 발급
+- 이전 Refresh Token은 자동 폐기, 새 Refresh Token 발급 (토큰 회전)
+
+**에러:**
+- `401 Unauthorized` — Refresh Token 없음, 폐기됨, 또는 만료됨
 
 ---
 
 ### GET `/auth/me`
 
 현재 인증된 사용자 정보를 반환합니다.
+
+**요청 헤더:**
+```
+Authorization: Bearer {access_token}
+```
 
 **응답 (200):**
 
@@ -62,6 +103,37 @@ Google OAuth 인증 코드를 JWT 액세스 토큰으로 교환합니다.
   "profile_image": "https://..."
 }
 ```
+
+---
+
+### POST `/auth/logout`
+
+로그아웃 및 Refresh Token 폐기.
+
+**요청 헤더:**
+```
+Authorization: Bearer {access_token}
+```
+
+**요청:**
+
+```json
+{
+  "refresh_token": "uuid-token-string"
+}
+```
+
+**응답 (200):**
+
+```json
+{
+  "message": "로그아웃되었습니다"
+}
+```
+
+**동작:**
+- 사용자의 모든 Refresh Token 폐기 (또는 특정 토큰만 폐기)
+- Access Token은 클라이언트에서 삭제
 
 ---
 

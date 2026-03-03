@@ -1,6 +1,6 @@
 # 문서 인덱스
 
-마지막 업데이트: 2026-03-01 (Phase 5 프론트엔드 완료 — Next.js 15 + Tailwind v4 + TanStack Query v5)
+마지막 업데이트: 2026-03-03 (Phase 5 프론트엔드 완료 + Refresh Token 구현)
 
 Bookchiki 프로젝트의 모든 문서를 한 곳에서 찾을 수 있습니다.
 
