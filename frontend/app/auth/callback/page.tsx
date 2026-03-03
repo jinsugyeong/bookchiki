@@ -27,7 +27,7 @@ function CallbackHandler() {
 
     loginWithGoogle(code)
       .then((data) => {
-        login(data.access_token, data.user);
+        login(data.access_token, data.refresh_token, data.user);
         router.replace("/");
       })
       .catch(() => {

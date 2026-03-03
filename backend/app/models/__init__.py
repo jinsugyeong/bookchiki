@@ -7,6 +7,7 @@ from app.models.book_import import BookImport
 from app.models.recommendation import Recommendation
 from app.models.highlight import Highlight
 from app.models.user_preference_profile import UserPreferenceProfile
+from app.models.refresh_token import RefreshToken
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "Recommendation",
     "Highlight",
     "UserPreferenceProfile",
+    "RefreshToken",
 ]

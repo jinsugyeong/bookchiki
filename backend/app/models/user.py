@@ -24,3 +24,4 @@ class User(Base):
     preference_profile: Mapped["UserPreferenceProfile | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
     )
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
