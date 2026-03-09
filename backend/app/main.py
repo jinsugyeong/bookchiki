@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api import auth, books, user_books, highlights, imports
 from app.api.recommendations import router as recommendations_router, admin_router
+from app.services.scheduler import start_scheduler, stop_scheduler
 
 # 기본 로깅 레벨을 INFO로 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -33,8 +34,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"OpenSearch not available — skipping index init: {e}")
 
+    # 자정 배치 스케줄러 시작
+    try:
+        start_scheduler()
+    except Exception as e:
+        logger.warning(f"Scheduler failed to start: {e}")
+
     yield
 
+    stop_scheduler()
     logger.info("Bookchiki API shutting down")
 
 
