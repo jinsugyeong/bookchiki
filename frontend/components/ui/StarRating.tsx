@@ -22,27 +22,35 @@ export default function StarRating({
 
   return (
     <div className="flex items-center gap-0.5" role="group" aria-label="별점">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          onClick={() => !readonly && onChange?.(star)}
-          onMouseEnter={() => !readonly && setHovered(star)}
-          onMouseLeave={() => !readonly && setHovered(0)}
-          disabled={readonly}
-          className={`transition-transform duration-100 ${
-            readonly ? "cursor-default" : "cursor-pointer hover:scale-110"
-          }`}
-          aria-label={`${star}점`}
-        >
-          <Star
-            size={size}
-            fill={star <= displayValue ? "var(--star)" : "none"}
-            color={star <= displayValue ? "var(--star)" : "var(--border-default)"}
-            strokeWidth={1.5}
-          />
-        </button>
-      ))}
+      {[1, 2, 3, 4, 5].map((star) =>
+        readonly ? (
+          <span key={star} aria-label={`${star}점`}>
+            <Star
+              size={size}
+              fill={star <= displayValue ? "var(--star)" : "none"}
+              color={star <= displayValue ? "var(--star)" : "var(--border-default)"}
+              strokeWidth={1.5}
+            />
+          </span>
+        ) : (
+          <button
+            key={star}
+            type="button"
+            onClick={() => onChange?.(star)}
+            onMouseEnter={() => setHovered(star)}
+            onMouseLeave={() => setHovered(0)}
+            className="transition-transform duration-100 cursor-pointer hover:scale-110"
+            aria-label={`${star}점`}
+          >
+            <Star
+              size={size}
+              fill={star <= displayValue ? "var(--star)" : "none"}
+              color={star <= displayValue ? "var(--star)" : "var(--border-default)"}
+              strokeWidth={1.5}
+            />
+          </button>
+        )
+      )}
     </div>
   );
 }
