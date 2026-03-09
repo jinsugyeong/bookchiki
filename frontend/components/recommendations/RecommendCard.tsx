@@ -4,13 +4,14 @@ import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, ThumbsDown, Heart, Check } from "lucide-react";
 import type { Recommendation, UserBook } from "@/lib/types";
-import { selectAladinBook, addToLibrary, getMyBooks } from "@/lib/api";
+import { addToLibrary, getMyBooks } from "@/lib/api";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 
 interface RecommendCardProps {
   recommendation: Recommendation;
   onDislike?: () => void;
   isRefreshing?: boolean;
+  showScore?: boolean;
 }
 
 /** 추천 책 카드 */
@@ -18,6 +19,7 @@ export default function RecommendCard({
   recommendation,
   onDislike,
   isRefreshing = false,
+  showScore = true,
 }: RecommendCardProps) {
   const queryClient = useQueryClient();
   const { title, author, description, cover_image_url, genre, reason, score } = recommendation;
@@ -30,22 +32,12 @@ export default function RecommendCard({
   });
 
   const isAlreadyAdded = (myBooks ?? []).some(
-    (ub) =>
-      ub.book.title === title && ub.book.author === author
+    (ub) => ub.book_id === recommendation.book_id
   );
 
-  /** 내 서재에 추가 (wishlist) */
+  /** 내 서재에 추가 (wishlist) — book_id는 백엔드에서 항상 채워줌 */
   const addMutation = useMutation({
-    mutationFn: async () => {
-      const book = await selectAladinBook({
-        title,
-        author,
-        cover_image_url,
-        genre,
-        description,
-      });
-      await addToLibrary({ book_id: book.id, status: "wishlist" });
-    },
+    mutationFn: () => addToLibrary({ book_id: recommendation.book_id, status: "wishlist" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["myBooks"] });
       queryClient.invalidateQueries({ queryKey: ["myStats"] });
@@ -112,24 +104,26 @@ export default function RecommendCard({
         </div>
       </div>
 
-      {/* 매칭 점수 바 */}
-      <div className="px-4 flex items-center gap-2">
-        <div
-          className="flex-1 rounded-full overflow-hidden"
-          style={{ height: "6px", background: "var(--bg-subtle)" }}
-        >
+      {/* 매칭 점수 바 (시스템 1에서만 표시) */}
+      {showScore && (
+        <div className="px-4 flex items-center gap-2">
           <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{
-              width: `${Math.min(Math.round(score * 100), 100)}%`,
-              background: "var(--accent)",
-            }}
-          />
+            className="flex-1 rounded-full overflow-hidden"
+            style={{ height: "6px", background: "var(--bg-subtle)" }}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${Math.min(Math.round(score * 100), 100)}%`,
+                background: "var(--accent)",
+              }}
+            />
+          </div>
+          <span className="text-[11px] flex-shrink-0 tabular-nums" style={{ color: "var(--text-muted)" }}>
+            {Math.min(Math.round(score * 100), 100)}% 매칭
+          </span>
         </div>
-        <span className="text-[11px] flex-shrink-0 tabular-nums" style={{ color: "var(--text-muted)" }}>
-          {Math.min(Math.round(score * 100), 100)}% 매칭
-        </span>
-      </div>
+      )}
 
       {/* 추천 이유 */}
       {reason && (

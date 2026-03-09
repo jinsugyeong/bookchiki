@@ -258,7 +258,7 @@ export const askRecommendation = async (question: string): Promise<Recommendatio
   if (data.results && !data.recommendations) {
     return {
       recommendations: (data.results as any[]).map((item, idx) => ({
-        book_id: item.isbn || `ask-${idx}`,
+        book_id: item.book_id || "",
         title: item.title ?? "",
         author: item.author ?? "",
         description: item.description ?? "",
@@ -271,6 +271,11 @@ export const askRecommendation = async (question: string): Promise<Recommendatio
     };
   }
   return data;
+};
+
+/** 추천 책 영구 비추천 ('다른 책' 버튼) */
+export const dismissRecommendation = async (bookId: string): Promise<void> => {
+  await api.post(`/recommendations/dismiss/${bookId}`);
 };
 
 /** 추천 강제 재생성 */

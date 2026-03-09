@@ -7,11 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from sqlalchemy import delete as sql_delete
+
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.book import Book
 from app.models.user_book import UserBook
+from app.models.user_dismissed_book import UserDismissedBook
 from app.schemas.user_book import UserBookCreate, UserBookUpdate, UserBookResponse, ReadingStats
 from app.services.profile_cache import mark_profile_dirty
 from app.services.user_book_indexer import index_user_book, delete_user_book
@@ -102,10 +105,20 @@ async def add_book(
 
     user_book = UserBook(user_id=current_user.id, **user_book_in.model_dump())
     db.add(user_book)
+
+    # 서재 추가 시 dismissed 기록 자동 삭제 (혼자 읽어서 직접 추가하는 경우)
+    await db.execute(
+        sql_delete(UserDismissedBook).where(
+            UserDismissedBook.user_id == current_user.id,
+            UserDismissedBook.book_id == user_book_in.book_id,
+        )
+    )
+
     await db.commit()
 
-    # 추천 캐시 dirty 마킹
-    await mark_profile_dirty(db, current_user.id, reason="book_added")
+    # 추천 캐시 dirty 마킹 (wishlist 제외 — 자정 배치에서 반영)
+    if user_book_in.status != "wishlist":
+        await mark_profile_dirty(db, current_user.id, reason="book_added")
 
     # OpenSearch user_books 인덱스 실시간 인덱싱
     if book_obj is not None:
