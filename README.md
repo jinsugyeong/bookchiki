@@ -16,7 +16,8 @@
 | 메인 DB | PostgreSQL 16 |
 | 검색/벡터 | OpenSearch 2.17 (하이브리드 BM25 + KNN) |
 | AI/ML | OpenAI API (GPT-4o-mini, text-embedding-3-small) |
-| 도서 데이터 | 알라딘 TTB API |
+| 도서 데이터 | 알라딘 TTB API (실시간 보완) |
+| 배치 스케줄링 | APScheduler (자정 배치) |
 | 프론트엔드 | Next.js 15 + Tailwind v4 + TanStack Query v5 (완료) |
 | 배포 | Docker Compose (개발) / AWS EC2 + RDS + OpenSearch / Vercel (프론트) |
 | 인증 | Google OAuth 2.0 + JWT |
@@ -25,27 +26,33 @@
 
 ### 시스템 1 — 기록 기반 개인화 추천
 
-DB 영속 취향 프로필 (`user_preference_profiles`) + `is_dirty` 이벤트 기반 캐시 + CF 앙상블로 즉시 응답.
+DB 영속 취향 프로필 (`user_preference_profiles`) + `is_dirty` 이벤트 기반 캐시 + 알라딘 실시간 보완 + CF 앙상블로 즉시 응답.
 
 ```
 GET /recommendations
         │
-   is_dirty 확인
+   is_dirty 확인 (ISBN 이중 필터)
    ┌─────┴─────┐
 false           true
    │               │
 캐시 히트        파이프라인 실행
-(~10ms)         ├─ 취향 벡터 계산 (평점 가중 임베딩 + 메모 임베딩)
+(~10ms)         ├─ 서재 + dismissed 제외 목록 구성
+                ├─ 취향 벡터 계산 (평점 가중 임베딩 + 메모 임베딩)
                 ├─ OpenSearch books 인덱스 하이브리드 검색 (BM25 + KNN)
+                ├─ 알라딘 실시간 보완 (DB 밖 책도 추천 가능)
+                │   └─ 신규 책 자동 저장 + 백그라운드 인덱싱
                 ├─ CF 앙상블 스코어링 (ALS 모델 있을 때만)
                 │   └─ 최종 점수 = α × OpenSearch + (1-α) × CF
                 │      (α는 서재 책 수에 따라 동적 조절)
+                ├─ 다양성 보장 + score 정규화
                 ├─ 최종 N권 DB 저장
                 ├─ user_preference_profiles 갱신 (is_dirty=false)
                 └─ 추천 이유 생성 (GPT-4o-mini)
 ```
 
-**Dirty 마킹 트리거:** 책 추가 / 평점·메모·상태 변경 / 책 삭제 / CSV 임포트
+**Dirty 마킹 트리거:** 책 추가 / 평점·메모·상태 변경 / 책 삭제 / CSV 임포트 / (매일 자정 배치)
+
+**Dismiss 기능:** "다른 책" 버튼으로 추천 책 영구 비추천 (`POST /recommendations/dismiss/{book_id}`). ISBN 기반 이중 필터로 이후 모든 추천에서 제외.
 
 **CF 앙상블 규칙:**
 - 서재 < 10권 → α=0.9 (콘텐츠 위주)
@@ -116,8 +123,9 @@ docker compose exec -w /project backend python scripts/train_cf.py
 | `POST /books/search` | 알라딘 도서 검색 |
 | `GET /my-books` | 내 서재 조회 |
 | `POST /my-books/{book_id}` | 평점/상태 업데이트 |
-| `GET /recommendations` | 개인화 추천 (캐시 히트 시 ~10ms) |
-| `POST /recommendations/ask` | 질문 기반 맞춤 추천 |
+| `GET /recommendations` | 개인화 추천 (캐시 히트 시 ~10ms, 알라딘 보완 포함) |
+| `POST /recommendations/ask` | 질문 기반 맞춤 추천 (서재 추가 가능) |
+| `POST /recommendations/dismiss/{book_id}` | 추천 책 영구 비추천 |
 | `GET /recommendations/profile` | 취향 프로필 조회 |
 | `POST /recommendations/refresh` | 강제 추천 재생성 |
 | `POST /imports/csv` | CSV 임포트 |

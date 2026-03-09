@@ -1,6 +1,6 @@
 # API 엔드포인트 레퍼런스
 
-마지막 업데이트: 2026-03-03 (Refresh Token 구현 + 로그아웃 기능 완료)
+마지막 업데이트: 2026-03-09 (Dismiss 기능 + 알라딘 실시간 보완 + 자정 배치 스케줄러 추가)
 
 이 문서는 Bookchiki 백엔드의 모든 API 엔드포인트를 설명합니다.
 
@@ -544,25 +544,39 @@ GET /recommendations?limit=10
 
 **동작:**
 1. `user_preference_profiles`에서 `is_dirty` 플래그 확인
-   - `is_dirty=false` → `recommendations` 테이블 직접 SELECT (캐시 히트, ~10ms)
+   - `is_dirty=false` → `recommendations` 테이블 직접 SELECT (캐시 히트, ~10ms, ISBN 이중 필터)
    - `is_dirty=true` → 전체 파이프라인 실행 (캐시 미스)
-2. 취향 벡터 계산:
+2. 서재 + dismissed 책 제외 목록 구성
+   - book_id + ISBN 이중 exclude로 서재/dismissed 책 영구 필터
+   - dismissed된 책도 이후 추천에서 영구 제외
+3. 취향 벡터 계산:
    - `user_books` OpenSearch 인덱스 단일 쿼리로 상호작용 데이터 전체 조회
      - `book_embedding` + `rating` → 평점 가중 성분
      - `memo_embedding` (not null인 것만) → 메모 선호 신호
    - `α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩` (α=0.6)
-3. 선호 장르 키워드 추출
-4. `books` OpenSearch 인덱스 하이브리드 검색 (BM25 + k-NN), 서재에 있는 책 제외
-5. **CF 앙상블 스코어링** (Phase 4.3)
+4. 선호 장르 키워드 추출
+5. `books` OpenSearch 인덱스 하이브리드 검색 (BM25 + k-NN, 최대 `limit - 2` 개)
+   - BM25: 선호 장르 키워드
+   - k-NN: 취향 벡터 유사도
+   - book_id + ISBN 이중으로 서재/dismissed 책 제외
+6. **알라딘 실시간 보완** (신규)
+   - OpenSearch에서 부족한 수만큼 알라딘 API 검색
+   - ISBN 기반 중복 체크 (서재/dismissed 책 제외)
+   - DB 밖 책도 추천 가능 → 신규 책 자동 저장 + 백그라운드 OpenSearch 인덱싱
+   - 항상 최소 2슬롯 확보 (`_ALADIN_SLOTS`)
+7. **CF 앙상블 스코어링** (Phase 4.3)
    - ALS 협업 필터링 모델에서 후보 도서 점수 조회
    - 최종 점수 = `α_ensemble × OpenSearch점수 + (1-α_ensemble) × CF점수`
    - α_ensemble 동적 조절: 서재 < 10권 → 0.9, 10-29권 → 0.7, ≥ 30권 → 0.5
    - CF 모델 없으면 원본 OpenSearch 점수 유지 (graceful degradation)
-6. 최종 N권 `recommendations` 테이블 저장
-7. `user_preference_profiles` 갱신 (`is_dirty=false`, `profile_data`, `preference_vector`)
-8. GPT-4o-mini로 추천 이유 생성
+8. 다양성 보장 + score 정규화
+   - 동일 장르 최대 2권, Gaussian 노이즈로 매번 다른 추천 생성
+   - score 범위 정규화: [0.80, 1.00]
+9. 최종 N권 `recommendations` 테이블 저장
+10. `user_preference_profiles` 갱신 (`is_dirty=false`, `profile_data`, `preference_vector`)
+11. GPT-4o-mini로 추천 이유 병렬 생성 (asyncio.gather)
 
-**주의:** Cold start(평점/메모 없음) 사용자는 `books` 인덱스에서 description 기준 폴백 검색으로 추천됩니다.
+**주의:** Cold start(평점/메모 없음) 사용자는 `books` 인덱스에서 description 기준 폴백 검색으로 추천됩니다. Dismissed 책은 이후 모든 추천에서 완벽하게 제외됩니다.
 
 ---
 
@@ -605,9 +619,11 @@ GET /recommendations?limit=10
    - 취향 프로필: `preference_summary`, `preferred_genres`, `disliked_genres`, `top_rated_books`
    - 검색 결과 (지식 베이스 청크)
 4. 사용자 질문 + 취향 프로필 + 검색 결과를 종합하여 맞춤 추천 생성
-5. 캐시 overwrite 없음 (별도 응답)
+5. 알라딘 API로 결과 검증 후 DB 저장 (book_id 확보) — "읽고 싶어요" 버튼 작동 가능
+6. 서재 + dismissed ISBN/book_id 제외 처리
+7. 최종 결과 반환 (캐시 overwrite 없음)
 
-**주의:** 캐시를 수정하지 않으므로 여러 번 질문 가능.
+**주의:** 캐시를 수정하지 않으므로 여러 번 질문 가능. 추천 결과에서 "읽고 싶어요" 버튼 클릭 시 서재에 추가됨.
 
 ---
 
@@ -669,6 +685,37 @@ GET /recommendations?limit=10
 **동작:**
 - `is_dirty` 플래그와 무관하게 파이프라인 강제 실행
 - 새로운 추천 결과 생성 + `user_preference_profiles` 갱신
+
+---
+
+### POST `/recommendations/dismiss/{book_id}` (신규)
+
+추천 책을 영구 비추천 처리합니다. ("다른 책" 버튼)
+
+**요청 경로 파라미터:**
+
+| 파라미터 | 타입 | 설명 |
+|---------|------|------|
+| `book_id` | UUID | 비추천할 도서 ID |
+
+**응답 (200):**
+
+```json
+{
+  "message": "도서가 영구 비추천 처리되었습니다.",
+  "book_id": "book-id-1"
+}
+```
+
+**동작:**
+1. `user_dismissed_books` 테이블에 사용자-도서 쌍 저장
+2. `recommendations` 캐시 테이블에서 해당 도서 즉시 삭제
+3. 멱등 처리 (이미 dismiss된 경우 무시)
+4. 이후 모든 추천(`GET /recommendations`, `POST /recommendations/ask`)에서 ISBN/book_id 기반으로 영구 제외
+
+**주의:**
+- 삭제 후 새로고침해도 동일 도서는 다시 나타나지 않습니다.
+- 사용자가 서재에 다시 추가한 경우 dismissed 레코드 자동 삭제는 아직 구현 안됨 (향후 개선 예정)
 
 ---
 
