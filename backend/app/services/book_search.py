@@ -1,6 +1,7 @@
 """book_search: books 인덱스 하이브리드 검색 (BM25 + k-NN).
 
 취향 벡터가 있으면 하이브리드 검색, 없으면 cold start 폴백.
+모든 검색에서 book_id + ISBN 이중 exclude 적용.
 """
 
 import logging
@@ -11,30 +12,52 @@ from app.opensearch.index import BOOKS_INDEX, HYBRID_PIPELINE_NAME
 logger = logging.getLogger(__name__)
 
 
+def _should_exclude(
+    book_id: str,
+    isbn: str,
+    exclude_ids: set[str],
+    exclude_isbns: set[str],
+) -> bool:
+    """book_id 또는 ISBN으로 제외 대상인지 판별."""
+    if book_id in exclude_ids:
+        return True
+    if isbn and isbn in exclude_isbns:
+        return True
+    return False
+
+
+def _hit_to_dict(hit: dict) -> dict:
+    """OpenSearch hit를 표준 dict로 변환."""
+    src = hit["_source"]
+    return {
+        "book_id": src.get("book_id", ""),
+        "title": src.get("title", ""),
+        "author": src.get("author", ""),
+        "genre": src.get("genre", ""),
+        "description": src.get("description", ""),
+        "isbn": src.get("isbn", ""),
+        "cover_image_url": src.get("cover_image_url", ""),
+        "score": hit.get("_score", 0.0),
+    }
+
+
 async def search_books_hybrid(
     preference_vector: list[float],
     genre_keywords: list[str],
     exclude_book_ids: list[str],
     k: int = 10,
     author_keywords: list[str] | None = None,
+    exclude_isbns: set[str] | None = None,
 ) -> list[dict]:
     """books 인덱스에서 하이브리드 검색 (BM25 + k-NN).
 
-    Args:
-        preference_vector: 1536차원 취향 벡터
-        genre_keywords: BM25 검색용 장르 키워드 목록
-        exclude_book_ids: 이미 서재에 있는 book_id 목록 (제외용)
-        k: 반환할 최대 결과 수
-        author_keywords: BM25 검색용 선호 작가 목록 (4점 이상 작가)
-
-    Returns:
-        [{"book_id", "title", "author", "genre", "description",
-          "isbn", "cover_image_url", "score"}] 리스트
+    book_id + ISBN 이중 exclude로 서재/dismissed 책 제외.
     """
-    # 서재 책 수 + k*2 여유분: 제외 후에도 k개 확보
-    fetch_size = len(exclude_book_ids) + k * 2
+    id_set = set(exclude_book_ids)
+    isbn_set = exclude_isbns or set()
+    fetch_size = len(id_set) + k * 3
 
-    # BM25 쿼리: 장르 + 작가 키워드를 should 절로 구성
+    # BM25 쿼리: 장르 + 작가 키워드
     should_clauses = []
     if genre_keywords:
         should_clauses += [
@@ -59,12 +82,8 @@ async def search_books_hybrid(
             }
         )
 
-    if should_clauses:
-        genre_query = {"bool": {"should": should_clauses}}
-    else:
-        genre_query = {"match_all": {}}
+    genre_query = {"bool": {"should": should_clauses}} if should_clauses else {"match_all": {}}
 
-    # k-NN 쿼리
     knn_query = {
         "knn": {
             "embedding": {
@@ -76,11 +95,7 @@ async def search_books_hybrid(
 
     body = {
         "size": fetch_size,
-        "query": {
-            "hybrid": {
-                "queries": [genre_query, knn_query],
-            }
-        },
+        "query": {"hybrid": {"queries": [genre_query, knn_query]}},
         "_source": ["book_id", "title", "author", "genre", "description", "isbn", "cover_image_url"],
     }
 
@@ -103,50 +118,37 @@ async def search_books_hybrid(
 
     hits = response.get("hits", {}).get("hits", [])
 
-    exclude_set = set(exclude_book_ids)
     results = []
     for hit in hits:
-        src = hit["_source"]
-        bid = src.get("book_id", "")
-        if bid in exclude_set:
+        d = _hit_to_dict(hit)
+        if _should_exclude(d["book_id"], d["isbn"], id_set, isbn_set):
             continue
-        results.append({
-            "book_id": bid,
-            "title": src.get("title", ""),
-            "author": src.get("author", ""),
-            "genre": src.get("genre", ""),
-            "description": src.get("description", ""),
-            "isbn": src.get("isbn", ""),
-            "cover_image_url": src.get("cover_image_url", ""),
-            "score": hit.get("_score", 0.0),
-        })
+        results.append(d)
         if len(results) >= k:
             break
 
     logger.info(
-        "[book-search] Hybrid search: %d results (k=%d, genres=%s, authors=%s, excluded=%d)",
-        len(results),
-        k,
-        genre_keywords[:3],
-        (author_keywords or [])[:3],
-        len(exclude_book_ids),
+        "[book-search] Hybrid: %d results (k=%d, genres=%s, excluded_ids=%d, excluded_isbns=%d)",
+        len(results), k, genre_keywords[:3], len(id_set), len(isbn_set),
     )
     return results
 
 
-async def search_books_cold_start(k: int = 10) -> list[dict]:
-    """preference_vector가 없을 때 폴백 검색.
+async def search_books_cold_start(
+    k: int = 10,
+    exclude_book_ids: list[str] | None = None,
+    exclude_isbns: set[str] | None = None,
+) -> list[dict]:
+    """preference_vector 없을 때 폴백 검색.
 
-    설명 + 임베딩이 있는 책 중 상위 k개 반환.
-
-    Args:
-        k: 반환할 최대 결과 수
-
-    Returns:
-        search_books_hybrid과 동일한 형식의 dict 리스트
+    설명 + 임베딩이 있는 책 중 서재/dismissed 제외 후 상위 k개 반환.
     """
+    id_set = set(exclude_book_ids or [])
+    isbn_set = exclude_isbns or set()
+    fetch_size = len(id_set) + k * 3
+
     body = {
-        "size": k,
+        "size": fetch_size,
         "query": {
             "bool": {
                 "must": [
@@ -165,19 +167,17 @@ async def search_books_cold_start(k: int = 10) -> list[dict]:
         return []
 
     hits = response.get("hits", {}).get("hits", [])
-    results = [
-        {
-            "book_id": hit["_source"].get("book_id", ""),
-            "title": hit["_source"].get("title", ""),
-            "author": hit["_source"].get("author", ""),
-            "genre": hit["_source"].get("genre", ""),
-            "description": hit["_source"].get("description", ""),
-            "isbn": hit["_source"].get("isbn", ""),
-            "cover_image_url": hit["_source"].get("cover_image_url", ""),
-            "score": hit.get("_score", 0.0),
-        }
-        for hit in hits
-    ]
+    results = []
+    for hit in hits:
+        d = _hit_to_dict(hit)
+        if _should_exclude(d["book_id"], d["isbn"], id_set, isbn_set):
+            continue
+        results.append(d)
+        if len(results) >= k:
+            break
 
-    logger.info("[book-search] Cold start: %d results", len(results))
+    logger.info(
+        "[book-search] Cold start: %d results (excluded_ids=%d, excluded_isbns=%d)",
+        len(results), len(id_set), len(isbn_set),
+    )
     return results

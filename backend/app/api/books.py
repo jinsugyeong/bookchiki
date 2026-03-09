@@ -49,11 +49,27 @@ async def select_aladin_book(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Save a selected Aladin search result to the books table."""
+    """Save a selected Aladin search result to the books table.
+
+    중복 방지: ISBN → title+author 순서로 기존 책 조회 후 있으면 반환.
+    """
     if book_data.isbn:
         existing = await db.execute(select(Book).where(Book.isbn == book_data.isbn))
         found = existing.scalar_one_or_none()
         if found:
+            return found
+
+    if book_data.title and book_data.author:
+        first_author = book_data.author.split(",")[0].split("(")[0].strip()
+        existing = await db.execute(
+            select(Book).where(
+                Book.title.ilike(book_data.title.strip()),
+                Book.author.ilike(f"%{first_author}%"),
+            )
+        )
+        found = existing.scalar_one_or_none()
+        if found:
+            logger.info("[books] 중복 책 감지 (title+author) → 기존 반환: '%s'", book_data.title)
             return found
 
     book = Book(
