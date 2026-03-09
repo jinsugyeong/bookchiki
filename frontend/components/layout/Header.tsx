@@ -35,23 +35,39 @@ function Logo() {
 
 /** 유저 아바타 — 프로필 이미지 or 이니셜 */
 function UserAvatar({ user }: { user: { name: string; profile_image?: string | null } }) {
-  if (user.profile_image) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={user.profile_image}
-        alt={user.name}
-        className="w-8 h-8 rounded-full object-cover"
-      />
-    );
-  }
-  return (
+  const initial = user.name.charAt(0).toUpperCase();
+
+  const fallback = (
     <div
-      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold"
+      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
       style={{ background: "var(--accent)" }}
     >
-      {user.name.charAt(0).toUpperCase()}
+      {initial}
     </div>
+  );
+
+  if (!user.profile_image) return fallback;
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={user.profile_image}
+      alt={user.name}
+      referrerPolicy="no-referrer"
+      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+      onError={(e) => {
+        const target = e.currentTarget;
+        target.style.display = "none";
+        const parent = target.parentElement;
+        if (parent) {
+          const div = document.createElement("div");
+          div.className = "w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0";
+          div.style.background = "var(--accent)";
+          div.textContent = initial;
+          parent.insertBefore(div, target);
+        }
+      }}
+    />
   );
 }
 
