@@ -10,7 +10,7 @@ import {
   Send,
   BookOpen,
 } from "lucide-react";
-import { getRecommendations, askRecommendation, refreshRecommendations } from "@/lib/api";
+import { getRecommendations, askRecommendation, refreshRecommendations, dismissRecommendation } from "@/lib/api";
 import type { Recommendation } from "@/lib/types";
 import RecommendCard from "@/components/recommendations/RecommendCard";
 import { PageLoading, SkeletonCard } from "@/components/ui/LoadingSpinner";
@@ -122,7 +122,8 @@ function System1Tab() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["recommendations"],
-    queryFn: () => getRecommendations(6), // 더 많이 가져와서 dismiss 후보 준비
+    queryFn: () => getRecommendations(6),
+    staleTime: 0, // 항상 서버에서 최신 데이터 (dismiss/서재 추가 반영)
   });
 
   const refreshMutation = useMutation({
@@ -133,8 +134,15 @@ function System1Tab() {
     },
   });
 
-  const handleDislike = (bookId: string) => {
+  const handleDislike = async (bookId: string) => {
     setDismissed((prev) => new Set([...prev, bookId]));
+    try {
+      await dismissRecommendation(bookId);
+      // 서버 dismiss 완료 후 캐시 무효화 → 다음 렌더에서 서버 데이터 반영
+      queryClient.invalidateQueries({ queryKey: ["recommendations"] });
+    } catch {
+      // 서버 저장 실패해도 클라이언트 dismiss는 유지
+    }
   };
 
   const visibleRecs = (data?.recommendations ?? [])
@@ -337,7 +345,7 @@ function System2Tab() {
                 className="animate-fade-in"
                 style={{ animationDelay: `${idx * 60}ms` }}
               >
-                <RecommendCard recommendation={rec} />
+                <RecommendCard recommendation={rec} showScore={false} />
               </div>
             ))}
           </div>

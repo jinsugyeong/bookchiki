@@ -1,15 +1,18 @@
 """추천 서비스: OpenSearch 하이브리드 검색 기반 파이프라인.
 
-1. is_dirty 확인 → 캐시 히트 시 DB 직접 조회
+1. is_dirty 확인 → 캐시 히트 시 DB 직접 조회 (ISBN 이중 필터)
 2. user_books 인덱스에서 취향 벡터 계산 (평점가중 책임베딩 + 메모임베딩)
 3. books 인덱스 하이브리드 검색 (BM25 + k-NN) or cold start
-4. CF 앙상블 스코어링 (ALS 모델 있을 때만)
-5. LLM 추천 이유 병렬 생성 (asyncio.gather)
-6. recommendations 테이블 저장 + user_preference_profiles 갱신
+4. 알라딘 실시간 보완 (항상 _ALADIN_SLOTS개 슬롯 확보)
+5. CF 앙상블 스코어링 (ALS 모델 있을 때만)
+6. 다양성 보장 + 매칭률 정규화
+7. LLM 추천 이유 병렬 생성 (asyncio.gather)
+8. recommendations 테이블 저장 + user_preference_profiles 갱신
 """
 
 import asyncio
 import logging
+import random
 from collections import Counter
 from uuid import UUID
 
@@ -22,8 +25,10 @@ from sqlalchemy.orm import joinedload
 from app.core.config import settings
 from app.models.user_book import UserBook
 from app.models.recommendation import Recommendation
+from app.models.user_dismissed_book import UserDismissedBook
 from app.services.user_book_indexer import get_user_book_interactions
 from app.services.book_search import search_books_hybrid, search_books_cold_start
+from app.services.aladin_supplement import supplement_with_aladin
 from app.services.profile_cache import (
     update_profile,
     is_recommendation_fresh,
@@ -34,28 +39,92 @@ logger = logging.getLogger(__name__)
 
 _openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-# 취향 벡터 가중치: α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩
+# ── 상수 ──────────────────────────────────────
 _BOOK_EMBEDDING_ALPHA = 0.6
 _MEMO_EMBEDDING_ALPHA = 0.4
 
-# CF 앙상블 alpha 기준 (서재 책 수 기반)
 _CF_ALPHA_THRESHOLDS: list[tuple[int, float]] = [
-    (10, 0.9),   # 서재 < 10권 → α=0.9 (OpenSearch 위주)
-    (30, 0.7),   # 서재 10-29권 → α=0.7
+    (10, 0.9),
+    (30, 0.7),
 ]
-_CF_ALPHA_DEFAULT = 0.5  # 서재 >= 30권
+_CF_ALPHA_DEFAULT = 0.5
+
+_MAX_SAME_GENRE = 2
+_SCORE_NOISE_STD = 0.03
+
+_SCORE_MIN_OUT = 0.80
+_SCORE_MAX_OUT = 1.00
+
+# 알라딘 보완: 항상 최소 이 수만큼 DB 밖 책 확보 시도
+_ALADIN_SLOTS = 2
 
 
-# ──────────────────────────────────────────────
-# CF 앙상블 스코어링
-# ──────────────────────────────────────────────
+# ── Exclude 집합 구성 ─────────────────────────
+
+class _ExcludeSet:
+    """서재 + dismissed 책의 book_id / ISBN 집합."""
+
+    def __init__(
+        self,
+        book_ids: set[str],
+        isbns: set[str],
+    ):
+        self.book_ids = book_ids
+        self.isbns = isbns
+
+    @property
+    def book_id_list(self) -> list[str]:
+        return list(self.book_ids)
+
+    def contains(self, book_id: str, isbn: str) -> bool:
+        """book_id 또는 ISBN으로 제외 대상인지 판별."""
+        if book_id in self.book_ids:
+            return True
+        if isbn and isbn in self.isbns:
+            return True
+        return False
+
+
+async def _build_exclude_set(
+    db: AsyncSession,
+    user_id: UUID,
+    user_books: list[UserBook],
+) -> _ExcludeSet:
+    """서재 + dismissed 책에서 exclude book_ids/isbns 수집."""
+    # 서재 book_id + ISBN
+    library_ids = {str(ub.book_id) for ub in user_books}
+    library_isbns = {
+        ub.book.isbn for ub in user_books if ub.book and ub.book.isbn
+    }
+
+    # dismissed book_id + ISBN (book 관계 조인)
+    dismissed_result = await db.execute(
+        select(UserDismissedBook)
+        .options(joinedload(UserDismissedBook.book))
+        .where(UserDismissedBook.user_id == user_id)
+    )
+    dismissed_list = dismissed_result.unique().scalars().all()
+    dismissed_ids = {str(d.book_id) for d in dismissed_list}
+    dismissed_isbns = {
+        d.book.isbn for d in dismissed_list if d.book and d.book.isbn
+    }
+
+    all_ids = library_ids | dismissed_ids
+    all_isbns = library_isbns | dismissed_isbns
+
+    logger.info(
+        "[recommend] exclude 구성: library=%d(%d isbn) dismissed=%d(%d isbn) → ids=%d isbns=%d",
+        len(library_ids), len(library_isbns),
+        len(dismissed_ids), len(dismissed_isbns),
+        len(all_ids), len(all_isbns),
+    )
+    return _ExcludeSet(book_ids=all_ids, isbns=all_isbns)
+
+
+# ── CF 앙상블 ─────────────────────────────────
 
 def _compute_ensemble_alpha(book_count: int) -> float:
-    """서재 책 수에 따른 앙상블 alpha 반환.
-
-    alpha가 클수록 OpenSearch 점수에 더 많은 가중치.
-    CF 데이터 부족 시 OpenSearch 위주로 추천.
-    """
+    """서재 책 수에 따른 앙상블 alpha 반환."""
     for threshold, alpha in _CF_ALPHA_THRESHOLDS:
         if book_count < threshold:
             return alpha
@@ -67,18 +136,7 @@ def _apply_cf_ensemble(
     user_id: UUID,
     book_count: int,
 ) -> list[dict]:
-    """CF 점수를 OpenSearch 점수와 앙상블하여 후보 재정렬.
-
-    CF 모델이 없거나 유저가 모델에 없으면 원본 candidates 그대로 반환.
-
-    Args:
-        candidates: OpenSearch 검색 결과 [{"book_id": ..., "score": ..., ...}]
-        user_id: 유저 UUID
-        book_count: 유저의 서재 책 수 (alpha 계산용)
-
-    Returns:
-        CF 점수 반영 후 재정렬된 candidates
-    """
+    """CF 점수를 OpenSearch 점수와 앙상블하여 후보 재정렬."""
     if not cf_scorer.is_available():
         logger.debug("[recommend] CF 모델 없음 → OpenSearch 점수만 사용")
         return candidates
@@ -93,11 +151,7 @@ def _apply_cf_ensemble(
     alpha = _compute_ensemble_alpha(book_count)
     logger.info(
         "[recommend] CF 앙상블: user=%s books=%d alpha=%.2f cf_matched=%d/%d",
-        user_id,
-        book_count,
-        alpha,
-        len(cf_scores),
-        len(candidates),
+        user_id, book_count, alpha, len(cf_scores), len(candidates),
     )
 
     updated = []
@@ -111,20 +165,91 @@ def _apply_cf_ensemble(
     return updated
 
 
-# ──────────────────────────────────────────────
-# 취향 벡터 계산
-# ──────────────────────────────────────────────
+# ── 다양성 + 정규화 ───────────────────────────
 
-async def _compute_preference_vector(
-    user_id: UUID,
-) -> list[float] | None:
+def _extract_leaf_genre(genre: str | None) -> str:
+    """알라딘 장르 계층(A>B>C)에서 최말단 장르 반환."""
+    if not genre:
+        return ""
+    return genre.split(">")[-1].strip()
+
+
+def _diversify_candidates(candidates: list[dict], limit: int) -> list[dict]:
+    """장르 다양성 보장 + score 노이즈로 매번 다른 추천 생성."""
+    noisy = []
+    for c in candidates:
+        noise = random.gauss(0, _SCORE_NOISE_STD)
+        noisy.append({**c, "score": round(c.get("score", 0.0) + noise, 6)})
+
+    noisy.sort(key=lambda x: x["score"], reverse=True)
+
+    if len(noisy) <= limit:
+        logger.info("[recommend] 후보 부족(%d≤%d) → 다양성 건너뜀", len(noisy), limit)
+        return noisy
+
+    genre_counts: Counter = Counter()
+    selected = []
+    deferred = []
+
+    for c in noisy:
+        leaf_genre = _extract_leaf_genre(c.get("genre", ""))
+        if leaf_genre and genre_counts[leaf_genre] >= _MAX_SAME_GENRE:
+            deferred.append(c)
+            continue
+        if leaf_genre:
+            genre_counts[leaf_genre] += 1
+        selected.append(c)
+        if len(selected) >= limit:
+            break
+
+    if len(selected) < limit:
+        seen_ids = {c["book_id"] for c in selected}
+        for c in deferred:
+            if c["book_id"] not in seen_ids:
+                selected.append(c)
+                if len(selected) >= limit:
+                    break
+
+    logger.info(
+        "[recommend] 다양성 적용: %d → %d권 (장르: %s)",
+        len(candidates), len(selected), dict(genre_counts.most_common(3)),
+    )
+    return selected
+
+
+def _normalize_scores(candidates: list[dict]) -> list[dict]:
+    """추천 결과 score를 [0.80, 1.00] 범위로 min-max 정규화."""
+    if not candidates:
+        return candidates
+
+    scores = [c.get("score", 0.0) for c in candidates]
+    min_s, max_s = min(scores), max(scores)
+
+    if max_s == min_s:
+        return [{**c, "score": _SCORE_MAX_OUT} for c in candidates]
+
+    return [
+        {
+            **c,
+            "score": round(
+                _SCORE_MIN_OUT
+                + (c.get("score", 0.0) - min_s) / (max_s - min_s)
+                * (_SCORE_MAX_OUT - _SCORE_MIN_OUT),
+                3,
+            ),
+        }
+        for c in candidates
+    ]
+
+
+# ── 취향 벡터 계산 ────────────────────────────
+
+async def _compute_preference_vector(user_id: UUID) -> list[float] | None:
     """user_books 인덱스에서 취향 벡터 계산.
 
     preference_vector = α × 평점가중_책임베딩 + (1-α) × 메모평균_임베딩 (α=0.6)
-    평점/메모가 모두 없으면 None 반환 (cold start).
     """
     interactions = await get_user_book_interactions(user_id)
-
     if not interactions:
         logger.info("[recommend] No interactions for user %s (cold start)", user_id)
         return None
@@ -137,12 +262,10 @@ async def _compute_preference_vector(
         book_emb = interaction.get("book_embedding")
         if not book_emb:
             continue
-
         rating = interaction.get("rating")
         weight = (rating / 5.0) if rating else 0.5
         book_embeddings.append(book_emb)
         book_weights.append(weight)
-
         memo_emb = interaction.get("memo_embedding")
         if memo_emb:
             memo_embeddings.append(memo_emb)
@@ -167,24 +290,15 @@ async def _compute_preference_vector(
 
     logger.info(
         "[recommend] Preference vector computed: user=%s books=%d memos=%d",
-        user_id,
-        len(book_embeddings),
-        len(memo_embeddings),
+        user_id, len(book_embeddings), len(memo_embeddings),
     )
     return combined.tolist()
 
 
-# ──────────────────────────────────────────────
-# 프로필 데이터 구성
-# ──────────────────────────────────────────────
+# ── 프로필 데이터 구성 ─────────────────────────
 
 def _build_profile_data(user_books: list[UserBook]) -> dict:
-    """로드된 user_books에서 profile_data 구성 (장르, 작가, 평점 통계 등).
-
-    Returns:
-        { preferred_genres, preferred_authors, disliked_genres,
-          preference_summary, top_rated_books, reading_count }
-    """
+    """로드된 user_books에서 profile_data 구성."""
     genre_counter: Counter[str] = Counter()
     author_counter: Counter[str] = Counter()
 
@@ -195,7 +309,6 @@ def _build_profile_data(user_books: list[UserBook]) -> dict:
             last_genre = ub.book.genre.split(">")[-1].strip()
             if last_genre:
                 genre_counter[last_genre] += 1
-        # 평점 4점 이상 작가만 선호 작가로 집계
         if ub.book.author and ub.rating and ub.rating >= 4:
             author_counter[ub.book.author] += 1
 
@@ -219,9 +332,7 @@ def _build_profile_data(user_books: list[UserBook]) -> dict:
     }
 
 
-# ──────────────────────────────────────────────
-# DB 캐시 조회
-# ──────────────────────────────────────────────
+# ── DB 캐시 조회 ──────────────────────────────
 
 async def _load_cached_recommendations(
     db: AsyncSession,
@@ -230,20 +341,54 @@ async def _load_cached_recommendations(
 ) -> list[dict]:
     """recommendations 테이블에서 캐시된 추천 조회.
 
-    Returns:
-        추천 dict 리스트 (book 정보 포함)
+    서재(wishlist 포함) + dismissed 책은 book_id + ISBN 이중 필터로 제외.
     """
-    result = await db.execute(
+    # 서재 전체 조회 (book_id + ISBN)
+    ub_result = await db.execute(
+        select(UserBook).options(joinedload(UserBook.book)).where(UserBook.user_id == user_id)
+    )
+    ub_list = ub_result.unique().scalars().all()
+    library_ids = {ub.book_id for ub in ub_list}
+    library_isbns = {ub.book.isbn for ub in ub_list if ub.book and ub.book.isbn}
+
+    # dismissed 전체 조회 (book_id + ISBN)
+    dismissed_result = await db.execute(
+        select(UserDismissedBook)
+        .options(joinedload(UserDismissedBook.book))
+        .where(UserDismissedBook.user_id == user_id)
+    )
+    dismissed_list = dismissed_result.unique().scalars().all()
+    dismissed_ids = {d.book_id for d in dismissed_list}
+    dismissed_isbns = {d.book.isbn for d in dismissed_list if d.book and d.book.isbn}
+
+    exclude_ids = library_ids | dismissed_ids
+    exclude_isbns = library_isbns | dismissed_isbns
+
+    # DB 쿼리 (book_id 기반 exclude)
+    query = (
         select(Recommendation)
         .options(joinedload(Recommendation.book))
         .where(Recommendation.user_id == user_id)
         .order_by(Recommendation.score.desc())
-        .limit(limit)
+        .limit(limit * 2)  # ISBN 이중 필터 후 부족 방지
     )
+    if exclude_ids:
+        query = query.where(Recommendation.book_id.not_in(exclude_ids))
+
+    result = await db.execute(query)
     recs = result.unique().scalars().all()
 
-    return [
-        {
+    # ISBN 이중 필터: 동일 책이 다른 book_id로 중복 저장된 경우
+    result_list = []
+    for rec in recs:
+        if len(result_list) >= limit:
+            break
+        rec_isbn = rec.book.isbn if rec.book else None
+        if rec_isbn and rec_isbn in exclude_isbns:
+            logger.info("[recommend] ISBN 이중 필터(cache): isbn='%s' title='%s' 제거",
+                        rec_isbn, rec.book.title if rec.book else "?")
+            continue
+        result_list.append({
             "book_id": str(rec.book_id),
             "title": rec.book.title if rec.book else "",
             "author": rec.book.author if rec.book else "",
@@ -252,14 +397,16 @@ async def _load_cached_recommendations(
             "cover_image_url": rec.book.cover_image_url if rec.book else "",
             "score": rec.score,
             "reason": rec.reason,
-        }
-        for rec in recs
-    ]
+        })
+
+    logger.info(
+        "[recommend] Cache HIT filter: ids=%d isbns=%d → %d recs",
+        len(exclude_ids), len(exclude_isbns), len(result_list),
+    )
+    return result_list
 
 
-# ──────────────────────────────────────────────
-# 유저 요약 (추천 이유 생성용)
-# ──────────────────────────────────────────────
+# ── 유저 요약 (추천 이유 생성용) ───────────────
 
 def _build_user_summary(user_books: list[UserBook]) -> str:
     """유저의 평점 높은 도서 목록을 텍스트 요약으로 생성."""
@@ -271,9 +418,7 @@ def _build_user_summary(user_books: list[UserBook]) -> str:
     return "\n".join(summary_parts) if summary_parts else "독서 기록 없음"
 
 
-# ──────────────────────────────────────────────
-# 추천 이유 생성 (LLM)
-# ──────────────────────────────────────────────
+# ── 추천 이유 생성 (LLM) ──────────────────────
 
 async def generate_recommendation_reason(
     user_books_summary: str,
@@ -281,10 +426,7 @@ async def generate_recommendation_reason(
     user_preferences: str = "",
     reason_hint: str = "",
 ) -> str:
-    """GPT-4o-mini를 사용해 한국어 추천 이유 생성.
-
-    reason_hint가 있으면 LLM이 해당 방향으로 추천 이유를 작성.
-    """
+    """GPT-4o-mini를 사용해 한국어 추천 이유 생성."""
     pref_section = f"\n사용자 취향 분석: {user_preferences}\n" if user_preferences else ""
     hint_section = f"\n추천 방향 힌트: {reason_hint}\n" if reason_hint else ""
 
@@ -313,9 +455,7 @@ async def generate_recommendation_reason(
         return "독서 취향 분석을 기반으로 추천된 도서입니다."
 
 
-# ──────────────────────────────────────────────
-# 메인: get_recommendations
-# ──────────────────────────────────────────────
+# ── 메인: get_recommendations ─────────────────
 
 async def get_recommendations(
     db: AsyncSession,
@@ -325,12 +465,14 @@ async def get_recommendations(
 ) -> list[dict]:
     """OpenSearch 하이브리드 검색 + CF 앙상블 기반 추천 파이프라인.
 
-    1. is_dirty 확인 → 캐시 히트 시 DB 직접 조회
-    2. user_books 인덱스에서 취향 벡터 계산
-    3. books 인덱스 하이브리드 검색 (or cold start 폴백)
-    4. CF 앙상블 스코어링 (모델 있을 때만)
-    5. LLM 추천 이유 asyncio.gather로 병렬 생성 (DB 트랜잭션 외부)
-    6. 기존 추천 삭제 + 새 추천 저장 + 프로필 갱신 (단일 트랜잭션)
+    1. is_dirty 확인 → 캐시 히트 시 DB 직접 조회 (ISBN 이중 필터)
+    2. user_books에서 취향 벡터 + 프로필 + exclude 집합 구성
+    3. books 인덱스 하이브리드 검색 (or cold start)
+    4. 알라딘 실시간 보완 (항상 _ALADIN_SLOTS개 슬롯 확보)
+    5. ISBN 이중 필터 후처리
+    6. CF 앙상블 + 다양성 + 정규화
+    7. LLM 추천 이유 병렬 생성
+    8. recommendations 저장 + 프로필 갱신
     """
     # 1. 캐시 확인 (is_dirty 플래그)
     if not force_refresh:
@@ -343,11 +485,9 @@ async def get_recommendations(
                 )
                 return cached
 
-    logger.info(
-        "[recommend] === 파이프라인 시작 (user=%s, limit=%d) ===", user_id, limit
-    )
+    logger.info("[recommend] === 파이프라인 시작 (user=%s, limit=%d) ===", user_id, limit)
 
-    # 2. user_books 한 번만 쿼리 (profile_data + 요약 공용)
+    # 2. user_books 한 번만 쿼리
     ub_result = await db.execute(
         select(UserBook)
         .options(joinedload(UserBook.book))
@@ -355,34 +495,62 @@ async def get_recommendations(
     )
     user_books = ub_result.unique().scalars().all()
 
-    # 3. 취향 벡터 계산 (OpenSearch user_books 인덱스)
+    # 3. 취향 벡터 + 프로필 + exclude 집합
     preference_vector = await _compute_preference_vector(user_id)
-
-    # 4. profile_data + exclude_book_ids 구성 (로드된 user_books 재사용)
     profile_data = _build_profile_data(user_books)
-    exclude_book_ids = [str(ub.book_id) for ub in user_books]
+    excludes = await _build_exclude_set(db, user_id, user_books)
 
-    # 5. OpenSearch 검색
+    # 4. OpenSearch 검색 (ISBN exclude 포함)
+    # 알라딘 슬롯 확보를 위해 OpenSearch에서 (limit - _ALADIN_SLOTS)개만 요청
+    os_limit = max(limit - _ALADIN_SLOTS, 1)
+
     if preference_vector is not None:
         candidates = await search_books_hybrid(
             preference_vector=preference_vector,
             genre_keywords=profile_data.get("preferred_genres", []),
             author_keywords=profile_data.get("preferred_authors", []),
-            exclude_book_ids=exclude_book_ids,
-            k=limit,
+            exclude_book_ids=excludes.book_id_list,
+            exclude_isbns=excludes.isbns,
+            k=os_limit,
         )
     else:
         logger.info("[recommend] Cold start: preference_vector is None")
-        candidates = await search_books_cold_start(k=limit)
+        candidates = await search_books_cold_start(
+            k=os_limit,
+            exclude_book_ids=excludes.book_id_list,
+            exclude_isbns=excludes.isbns,
+        )
+
+    # 5. 알라딘 실시간 보완 (항상 실행 — 나머지 슬롯 알라딘으로 채움)
+    if len(candidates) < limit:
+        candidates = await supplement_with_aladin(
+            db=db,
+            candidates=candidates,
+            genre_keywords=profile_data.get("preferred_genres", []),
+            exclude_book_ids=excludes.book_id_list,
+            exclude_isbns=excludes.isbns,
+            limit=limit,
+        )
+
+    # 5.5 ISBN 이중 필터 후처리 (안전장치)
+    before = len(candidates)
+    candidates = [
+        c for c in candidates
+        if not excludes.contains(c["book_id"], c.get("isbn", ""))
+    ]
+    if len(candidates) < before:
+        logger.info("[recommend] ISBN 이중 필터: %d → %d", before, len(candidates))
 
     if not candidates:
         logger.info("[recommend] No candidates found, returning empty")
         return []
 
-    # 6. CF 앙상블 스코어링 (모델 있을 때만 적용)
+    # 6. CF 앙상블 + 다양성 + 정규화
     candidates = _apply_cf_ensemble(candidates, user_id, len(user_books))
+    candidates = _diversify_candidates(candidates, limit)
+    candidates = _normalize_scores(candidates)
 
-    # 7. LLM 추천 이유 병렬 생성 (DB 트랜잭션 외부 — 실패해도 기존 데이터 안전)
+    # 7. LLM 추천 이유 병렬 생성
     user_summary = _build_user_summary(user_books)
     user_preferences = ", ".join(profile_data.get("preferred_genres", []))
 
@@ -391,7 +559,7 @@ async def get_recommendations(
         for c in candidates
     ])
 
-    # 8. 기존 추천 삭제 + 새 추천 저장 + 프로필 갱신 (단일 트랜잭션)
+    # 8. 기존 추천 삭제 + 새 추천 저장 + 프로필 갱신
     try:
         await db.execute(
             delete(Recommendation).where(Recommendation.user_id == user_id)
@@ -424,7 +592,5 @@ async def get_recommendations(
         await db.rollback()
         raise
 
-    logger.info(
-        "[recommend] === 파이프라인 완료: %d건 추천 생성 ===", len(recommendations)
-    )
+    logger.info("[recommend] === 파이프라인 완료: %d건 추천 생성 ===", len(recommendations))
     return recommendations

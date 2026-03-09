@@ -9,13 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.book import Book
+from app.models.user_dismissed_book import UserDismissedBook
 from app.schemas.recommendation import (
     RecommendationListResponse,
     RecommendationResponse,
@@ -99,19 +100,42 @@ async def ask_recommendations(
     if not suggestions_raw:
         return AskResponse(results=[], total=0, question=request.question)
 
+    # 서재 + dismissed ISBN/book_id 수집 (제외용)
+    from app.models.user_book import UserBook
+    from app.models.user_dismissed_book import UserDismissedBook
+    library_result = await db.execute(
+        select(UserBook.book_id).where(UserBook.user_id == current_user.id)
+    )
+    library_book_ids = {str(r) for r in library_result.scalars().all()}
+    dismissed_result = await db.execute(
+        select(UserDismissedBook.book_id).where(UserDismissedBook.user_id == current_user.id)
+    )
+    dismissed_book_ids = {str(r) for r in dismissed_result.scalars().all()}
+    exclude_ids = library_book_ids | dismissed_book_ids
+
     results = []
-    for item in suggestions_raw[: request.limit]:
+    for item in suggestions_raw:
+        if len(results) >= request.limit:
+            break
         title = item.get("title", "")
         author = item.get("author", "")
-        book_info = await _find_book_info(db, title)
+        book_info = await _find_or_save_book(db, title, author)
+
+        # 서재/dismissed 책 제외
+        bid = book_info.get("book_id", "")
+        if bid and bid in exclude_ids:
+            logger.info("[ask] 서재/dismissed 책 제외: '%s'", title)
+            continue
+
         results.append(AskResultItem(
-            title=title,
-            author=author,
+            title=book_info.get("title") or title,
+            author=book_info.get("author") or author,
             reason=item.get("reason_hint", ""),
-            isbn="",
-            cover_image_url=book_info["cover_image_url"],
-            genre=book_info["genre"],
-            description=book_info["description"],
+            book_id=bid,
+            isbn=book_info.get("isbn", ""),
+            cover_image_url=book_info.get("cover_image_url", ""),
+            genre=book_info.get("genre", ""),
+            description=book_info.get("description", ""),
         ))
 
     logger.info(
@@ -120,6 +144,53 @@ async def ask_recommendations(
     )
 
     return AskResponse(results=results, total=len(results), question=request.question)
+
+
+@router.post("/dismiss/{book_id}", status_code=204)
+async def dismiss_recommendation(
+    book_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """추천 책 영구 비추천 처리 ('다른 책' 버튼).
+
+    1. user_dismissed_books에 영구 저장
+    2. recommendations 캐시에서 즉시 제거 → 새로고침해도 안 나옴
+    멱등 처리 (이미 dismiss된 경우 무시).
+    """
+    from app.models.recommendation import Recommendation
+
+    existing = await db.execute(
+        select(UserDismissedBook).where(
+            UserDismissedBook.user_id == current_user.id,
+            UserDismissedBook.book_id == book_id,
+        )
+    )
+    if existing.scalar_one_or_none() is None:
+        db.add(UserDismissedBook(user_id=current_user.id, book_id=book_id))
+
+    # recommendations 캐시에서 즉시 삭제 (새로고침해도 복구 안됨)
+    del_result = await db.execute(
+        delete(Recommendation).where(
+            Recommendation.user_id == current_user.id,
+            Recommendation.book_id == book_id,
+        )
+    )
+
+    await db.commit()
+
+    # 검증 로그
+    verify = await db.execute(
+        select(UserDismissedBook).where(
+            UserDismissedBook.user_id == current_user.id,
+            UserDismissedBook.book_id == book_id,
+        )
+    )
+    saved = verify.scalar_one_or_none()
+    logger.info(
+        "[dismiss] user=%s book=%s dismissed_saved=%s rec_deleted=%d",
+        current_user.id, book_id, saved is not None, del_result.rowcount,
+    )
 
 
 @router.get("/profile", response_model=ProfileResponse)
@@ -136,23 +207,50 @@ async def get_preference_profile(
     )
 
 
-async def _find_book_info(db: AsyncSession, title: str) -> dict:
-    """제목으로 books 테이블에서 표지 이미지 URL, 설명, 장르 조회."""
-    empty = {"cover_image_url": "", "description": "", "genre": ""}
+async def _find_or_save_book(db: AsyncSession, title: str, author: str) -> dict:
+    """DB에서 책 조회 → 없으면 알라딘 API로 검증 후 저장.
+
+    시스템 2 LLM 추천 결과의 book_id를 항상 확보하기 위해 사용.
+    """
+    from app.services.aladin import search_books as aladin_search
+    from app.services.aladin_supplement import _find_existing_book, _save_new_book
+
+    empty = {"book_id": "", "title": title, "author": author,
+             "isbn": "", "cover_image_url": "", "description": "", "genre": ""}
     if not title:
         return empty
+
+    # 1. DB에서 먼저 조회
     result = await db.execute(
-        select(Book.cover_image_url, Book.description, Book.genre).where(
-            Book.title.ilike(f"%{title}%")
-        ).limit(1)
+        select(Book).where(Book.title.ilike(f"%{title}%")).limit(1)
     )
-    row = result.one_or_none()
-    if not row:
+    book = result.scalar_one_or_none()
+
+    # 2. DB에 없으면 알라딘 검증 후 저장
+    if not book:
+        try:
+            aladin_results = await aladin_search(f"{title} {author}".strip(), max_results=3)
+            for aladin_book in aladin_results:
+                if title.strip().lower() in aladin_book.title.strip().lower():
+                    from app.schemas.book import BookSearchResult
+                    book = await _save_new_book(db, aladin_book)
+                    if book:
+                        logger.info("[ask] 알라딘 검증 후 저장: '%s'", book.title)
+                        break
+        except Exception:
+            logger.warning("[ask] 알라딘 검색 실패: title='%s'", title)
+
+    if not book:
         return empty
+
     return {
-        "cover_image_url": row.cover_image_url or "",
-        "description": row.description or "",
-        "genre": row.genre or "",
+        "book_id": str(book.id),
+        "title": book.title,
+        "author": book.author or author,
+        "isbn": book.isbn or "",
+        "cover_image_url": book.cover_image_url or "",
+        "description": book.description or "",
+        "genre": book.genre or "",
     }
 
 

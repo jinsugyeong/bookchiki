@@ -34,6 +34,7 @@ class AskResultItem(BaseModel):
     title: str
     author: str
     reason: str
+    book_id: str = ""   # DB에 있으면 채움, 없으면 빈 문자열
     isbn: str = ""
     cover_image_url: str = ""
     genre: str = ""
