@@ -77,3 +77,13 @@ class IndexStatusResponse(BaseModel):
     failed: int
     skipped: int = 0
     total_tokens: int
+
+
+class AskHistoryResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    question: str
+    results: list[dict]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

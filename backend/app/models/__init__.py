@@ -9,6 +9,7 @@ from app.models.highlight import Highlight
 from app.models.user_preference_profile import UserPreferenceProfile
 from app.models.refresh_token import RefreshToken
 from app.models.user_dismissed_book import UserDismissedBook
+from app.models.ask_history import AskHistory
 
 __all__ = [
     "User",
@@ -22,4 +23,5 @@ __all__ = [
     "UserPreferenceProfile",
     "RefreshToken",
     "UserDismissedBook",
+    "AskHistory",
 ]
