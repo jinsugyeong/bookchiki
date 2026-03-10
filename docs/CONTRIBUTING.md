@@ -40,7 +40,7 @@ cp backend/.env.example backend/.env
 - `OPENAI_API_KEY` — OpenAI API 키 (임베딩 및 추천 이유 생성용)
 - `APP_ENV` — `development` 또는 `production`
 
-자세한 환경변수 설명은 [ENV.md](./ENV.md) 참고.
+자세한 환경변수 설명은 [ENV.md](./docs/ENV.md) 참고.
 
 ### 3. Python 가상환경 구성
 
@@ -172,7 +172,7 @@ alembic upgrade head
 - **Swagger UI:** http://localhost:8000/docs
 - **ReDoc:** http://localhost:8000/redoc
 
-API 엔드포인트 상세 목록은 [API.md](./API.md) 참고.
+API 엔드포인트 상세 목록은 [API.md](./docs/API.md) 참고.
 
 ---
 

@@ -104,6 +104,7 @@ export interface User {
   email: string;
   name: string;
   profile_image?: string;
+  instagram_username?: string | null;
 }
 
 /** CSV 임포트 결과 */

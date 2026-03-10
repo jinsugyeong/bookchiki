@@ -15,6 +15,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     profile_image: Mapped[str | None] = mapped_column(String(500))
+    instagram_username: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user_books: Mapped[list["UserBook"]] = relationship(back_populates="user", cascade="all, delete-orphan")

@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.core.security import create_access_token, create_refresh_token
 from app.models.user import User
 from app.models.refresh_token import RefreshToken
-from app.schemas.user import TokenResponse, UserResponse, RefreshRequest, AccessTokenResponse
+from app.schemas.user import TokenResponse, UserResponse, RefreshRequest, AccessTokenResponse, UserUpdateRequest
 from app.api.deps import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,24 @@ async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     """현재 인증된 사용자 정보 반환."""
+    return UserResponse.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    body: UserUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """현재 로그인한 사용자 프로필 업데이트 (인스타그램 계정명 등)."""
+    if body.instagram_username is not None:
+        current_user.instagram_username = body.instagram_username or None
+    elif "instagram_username" in body.model_fields_set:
+        current_user.instagram_username = None
+
+    await db.commit()
+    await db.refresh(current_user)
+    logger.info(f"[Auth] 프로필 업데이트: user_id={current_user.id}, instagram={current_user.instagram_username}")
     return UserResponse.model_validate(current_user)
 
 

@@ -9,6 +9,7 @@ interface AuthUser {
   email: string;
   name: string;
   profile_image?: string | null;
+  instagram_username?: string | null;
 }
 
 interface AuthContextValue {
@@ -16,6 +17,7 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (accessToken: string, refreshToken: string, user: AuthUser) => void;
   logout: () => void;
+  updateUser: (fields: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -63,8 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push("/");
   }, [router]);
 
+  /** 로컬 user 상태 부분 업데이트 (서버 요청 없이 즉시 반영) */
+  const updateUser = useCallback((fields: Partial<AuthUser>) => {
+    setUser((prev) => (prev ? { ...prev, ...fields } : prev));
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
