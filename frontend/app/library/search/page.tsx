@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Plus, BookOpen, Check, ArrowLeft, RotateCcw } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { searchAladin, deleteUserBook } from "@/lib/api";
 import type { AladinBook, UserBook } from "@/lib/types";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
@@ -18,6 +19,7 @@ const SEARCH_PAGE_SIZE = 10;
 export default function LibrarySearchPage() {
   const { user, isLoading: authLoading } = useRequireAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<AladinBook[]>([]);
   /** key → userBookId 매핑 (취소용 ID 보존) */
@@ -49,6 +51,7 @@ export default function LibrarySearchPage() {
       queryClient.invalidateQueries({ queryKey: ["myStats"] });
     }
     setModalBook(null);
+    router.push("/library");
   };
 
   const handleUndo = async (key: string) => {

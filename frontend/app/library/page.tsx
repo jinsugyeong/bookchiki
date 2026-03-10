@@ -36,14 +36,16 @@ export default function LibraryPage() {
   const [selectedBook, setSelectedBook] = useState<UserBook | null>(null);
   const [page, setPage] = useState(1);
 
-  if (authLoading) return <PageLoading />;
-  if (!user) return null;
-
   // 전체 목록을 한 번만 fetch해서 탭 개수 + 필터링에 재사용
+  // hooks는 early return 전에 선언해야 함 (Rules of Hooks)
   const { data: allBooks, isLoading } = useQuery({
     queryKey: ["myBooks"],
     queryFn: () => getMyBooks({ limit: 500 }),
+    enabled: !!user,
   });
+
+  if (authLoading) return <PageLoading />;
+  if (!user) return null;
 
   const books = statusFilter
     ? (allBooks ?? []).filter((ub) => ub.status === statusFilter)
