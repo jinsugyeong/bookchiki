@@ -71,90 +71,203 @@ async def refresh_recommendations(
     )
 
 
+async def _fetch_books_via_web_search(query: str) -> list[dict]:
+    """httpx를 사용하여 실시간 도서 정보를 검색하고 후보 목록을 생성."""
+    import httpx
+    from app.core.config import settings
+
+    tavily_api_key = getattr(settings, "TAVILY_API_KEY", None)
+    if not tavily_api_key:
+        logger.warning("[WebSearch] TAVILY_API_KEY가 없습니다.")
+        return []
+
+    url = "https://api.tavily.com/search"
+    payload = {
+        "api_key": tavily_api_key,
+        "query": f"실제 출판된 한국 도서 추천: {query}",
+        "search_depth": "advanced",
+        "max_results": 8
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error("[WebSearch] Tavily API 오류: %s", resp.text)
+                return []
+            data = resp.json()
+                
+        search_context = "\n".join([r.get("content", "") for r in data.get("results", [])])
+        
+        # 검색 결과에서 제목/저자 추출 (Strict Extraction)
+        extraction_prompt = (
+            "다음 검색 결과에서 언급된 실제 도서들의 [제목]과 [저자]를 추출하세요.\n"
+            "한국어로 출판된 실존 도서여야 합니다.\n"
+            "JSON 형식: " + '{"books": [{"title": "제목", "author": "저자"}]}' + 
+            f"\n\n검색 결과:\n{search_context}"
+        )
+        
+        response = await _openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": extraction_prompt}],
+            response_format={"type": "json_object"}
+        )
+        extracted = json.loads(response.choices[0].message.content)
+        return extracted.get("books", [])
+    except Exception as e:
+        logger.error("[WebSearch] 실패: %s", e)
+        return []
+
 @router.post("/ask", response_model=AskResponse)
 async def ask_recommendations(
     request: AskRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """질문 기반 추천: 자연어 질문 + 취향 프로필 컨텍스트 → RAG 검색 → LLM 추천.
-
-    관리자용 질문/결과 이력 저장됨.
-    """
-    # 1단계: 취향 프로필 조회 (is_dirty 무관)
+    """최종 엄격 검증 파이프라인: Web Search -> LLM Selection -> Strict Aladin Validation."""
+    # 1. 컨텍스트 수집
     profile = await get_or_create_profile(db, current_user.id)
-    profile_data = profile.profile_data or {}
-
-    profile_context = _build_profile_context(profile_data)
-
-    # 2단계: rag_knowledge 인덱스 하이브리드 검색
+    profile_context = _build_profile_context(profile.profile_data or {})
     rag_chunks = await search_knowledge(request.question, k=10)
-    rag_context = _build_rag_context(rag_chunks)
-
-    # 3단계: LLM 호출 (취향 프로필 + RAG 청크 컨텍스트)
-    suggestions_raw = await _ask_llm(
+    
+    # 2. 웹 검색으로 실존 후보군 확보 (항상 실행하여 최신성/실존성 보장)
+    logger.info("[ask] Tavily Web Search로 실존 후보 확보 중...")
+    candidate_pool = await _fetch_books_via_web_search(request.question)
+    
+    # 3. LLM에게 후보군 중 10권 선택 요청 (검증 탈락 대비 여유분 확보)
+    pool_str = "\n".join([f"- {c['title']} ({c['author']})" for c in candidate_pool]) if candidate_pool else "지식 기반"
+    
+    suggestions_raw = await _ask_llm_for_selection(
         question=request.question,
         profile_context=profile_context,
-        rag_context=rag_context,
-        limit=request.limit,
+        rag_context=_build_rag_context(rag_chunks),
+        pool_str=pool_str,
+        limit=10 # 3권을 꽉 채우기 위해 후보군 대폭 확대
     )
+
+    logger.info("[ask] LLM 후보 수: %d / 요청: %d", len(suggestions_raw), 10)
 
     if not suggestions_raw:
         return AskResponse(results=[], total=0, question=request.question)
 
-    # 서재 + dismissed ISBN/book_id 수집 (제외용)
+    # 4. STRICT 알라딘 검증 (실존하는 책만 결과에 추가)
     from app.models.user_book import UserBook
-    from app.models.user_dismissed_book import UserDismissedBook
-    library_result = await db.execute(
-        select(UserBook.book_id).where(UserBook.user_id == current_user.id)
-    )
-    library_book_ids = {str(r) for r in library_result.scalars().all()}
-    dismissed_result = await db.execute(
-        select(UserDismissedBook.book_id).where(UserDismissedBook.user_id == current_user.id)
-    )
-    dismissed_book_ids = {str(r) for r in dismissed_result.scalars().all()}
-    exclude_ids = library_book_ids | dismissed_book_ids
+    library_stmt = select(Book.title).join(UserBook, Book.id == UserBook.book_id).where(UserBook.user_id == current_user.id)
+    library_res = await db.execute(library_stmt)
+    library_titles = {"".join(r[0].split()).lower() for r in library_res.all()}
 
     results = []
-    for item in suggestions_raw:
-        if len(results) >= request.limit:
-            break
-        title = item.get("title", "")
-        author = item.get("author", "")
-        book_info = await _find_or_save_book(db, title, author)
+    seen_titles = set()
 
-        # 서재/dismissed 책 제외
+    for item in suggestions_raw:
+        if len(results) >= request.limit: # 3권 채우면 종료
+            break
+            
+        title = item.get("title", "").strip()
+        author = item.get("author", "").strip()
+        norm_title = "".join(title.split()).lower()
+        
+        if not title or norm_title in seen_titles or norm_title in library_titles:
+            continue
+
+        # [CRITICAL] 알라딘 API 실존 검증
+        # _find_or_save_book 내부에서 알라딘 검색 실패 시 book_id를 반환하지 않도록 설계됨
+        book_info = await _find_or_save_book_strict(db, title, author)
         bid = book_info.get("book_id", "")
-        if bid and bid in exclude_ids:
-            logger.info("[ask] 서재/dismissed 책 제외: '%s'", title)
+
+        if not bid:
+            logger.warning("[ask] 실존하지 않는 도서 제외: '%s'", title)
             continue
 
         results.append(AskResultItem(
-            title=book_info.get("title") or title,
-            author=book_info.get("author") or author,
+            title=book_info["title"],
+            author=book_info["author"],
             reason=item.get("reason_hint", ""),
             book_id=bid,
-            isbn=book_info.get("isbn", ""),
-            cover_image_url=book_info.get("cover_image_url", ""),
-            genre=book_info.get("genre", ""),
-            description=book_info.get("description", ""),
+            isbn=book_info["isbn"],
+            cover_image_url=book_info["cover_image_url"],
+            genre=book_info["genre"],
+            description=book_info["description"],
         ))
+        seen_titles.add(norm_title)
 
-    logger.info(
-        "[ask] user=%s question='%s' results=%d",
-        current_user.id, request.question, len(results),
-    )
-
-    # 관리자용 이력 저장
-    history = AskHistory(
-        user_id=current_user.id,
-        question=request.question,
-        results=[r.model_dump() for r in results]
-    )
+    # 5. 이력 저장
+    history = AskHistory(user_id=current_user.id, question=request.question, results=[r.model_dump() for r in results])
     db.add(history)
     await db.commit()
 
     return AskResponse(results=results, total=len(results), question=request.question)
+
+async def _ask_llm_for_selection(
+    question: str,
+    profile_context: str,
+    rag_context: str,
+    pool_str: str,
+    limit: int,
+) -> list[dict]:
+    """LLM이 후보군에서 검증할 도서를 선별."""
+    system_prompt = (
+        "당신은 한국 도서 추천 전문가입니다.\n"
+        "사용자의 질문에서 핵심 주제(예: '아버지', '성장', '이민')를 파악하고, "
+        "그 주제가 책의 중심 테마인 도서만 추천하세요.\n"
+        "주제와 관련이 없는 유명 도서를 억지로 끼워넣지 마세요.\n\n"
+        "아래 [후보 도서 목록]을 우선 활용하되, 목록이 부족하거나 주제에 맞지 않으면 "
+        "실존하는 다른 한국 도서로 채워서 반드시 "
+        f"{limit}권을 채워야 합니다.\n"
+        "절대로 가공의 책을 만들어내면 안 됩니다. "
+        "알라딘 서점에서 실제로 검색되는 책만 포함하세요.\n\n"
+        f"## [사용자 취향]\n{profile_context}\n\n"
+        f"## [참고 자료]\n{rag_context}\n\n"
+        f"## [후보 도서 목록 (우선 활용)]\n{pool_str}\n\n"
+        "reason_hint는 '이 책의 [핵심 테마]가 사용자 질문의 [키워드]와 "
+        "어떻게 연결되는지' 구체적으로 1-2문장으로 작성하세요.\n\n"
+        f"반드시 {limit}권을 JSON 배열로만 응답하세요. "
+        '형식: [{"title": "제목", "author": "저자", "reason_hint": "이유"}]'
+    )
+    try:
+        response = await _openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": question}],
+            temperature=0.1,
+        )
+        raw = response.choices[0].message.content.strip()
+        if "```" in raw: raw = raw.split("```json")[-1].split("```")[0].strip()
+        return json.loads(raw)
+    except: return []
+
+async def _find_or_save_book_strict(db: AsyncSession, title: str, author: str) -> dict:
+    """[Strict] 알라딘 API 검색 성공 시에만 데이터를 반환."""
+    from app.services.aladin import search_books as aladin_search
+    from app.services.aladin_supplement import _save_new_book
+
+    # 1. DB 조회
+    res = await db.execute(select(Book).where(Book.title.ilike(f"%{title}%")).limit(1))
+    book = res.scalar_one_or_none()
+    
+    if not book:
+        # 2. 알라딘 엄격 검색 (제목 + 저자)
+        try:
+            search_res = await aladin_search(f"{title} {author}", max_results=3)
+            for b in search_res:
+                # 유연한 제목 매칭 (양방향 확인)
+                norm_q = "".join(title.split()).lower()
+                norm_b = "".join(b.title.split()).lower()
+                if norm_q in norm_b or norm_b in norm_q:
+                    book = await _save_new_book(db, b)
+                    break
+        except: pass
+
+    if not book: return {} # 검증 실패
+
+    return {
+        "book_id": str(book.id),
+        "title": book.title,
+        "author": book.author,
+        "isbn": book.isbn,
+        "cover_image_url": book.cover_image_url,
+        "genre": book.genre,
+        "description": book.description,
+    }
 
 
 @router.post("/dismiss/{book_id}", status_code=204)
@@ -226,43 +339,65 @@ async def _find_or_save_book(db: AsyncSession, title: str, author: str) -> dict:
     from app.services.aladin import search_books as aladin_search
     from app.services.aladin_supplement import _find_existing_book, _save_new_book
 
-    empty = {"book_id": "", "title": title, "author": author,
-             "isbn": "", "cover_image_url": "", "description": "", "genre": ""}
+    # 결과 기본값 (검증 실패 시에도 최소한의 정보는 반환)
+    result_data = {"book_id": "", "title": title, "author": author,
+                   "isbn": "", "cover_image_url": "", "description": "", "genre": ""}
     if not title:
-        return empty
+        return result_data
 
-    # 1. DB에서 먼저 조회
-    result = await db.execute(
-        select(Book).where(Book.title.ilike(f"%{title}%")).limit(1)
-    )
-    book = result.scalar_one_or_none()
+    # 제목 정규화 (공백 제거, 소문자화)
+    def normalize(t):
+        return "".join(t.split()).lower()
+
+    norm_title = normalize(title)
+
+    # 1. DB에서 먼저 조회 (제목 + 저자 조합)
+    query = select(Book).where(Book.title.ilike(f"%{title}%"))
+    if author and len(author) > 1:
+        query = query.where(Book.author.ilike(f"%{author}%"))
+    
+    db_result = await db.execute(query.limit(1))
+    book = db_result.scalar_one_or_none()
+
+    # 1.1 제목으로만 다시 시도
+    if not book:
+        db_result = await db.execute(
+            select(Book).where(Book.title.ilike(f"%{title}%")).limit(1)
+        )
+        book = db_result.scalar_one_or_none()
 
     # 2. DB에 없으면 알라딘 검증 후 저장
     if not book:
-        try:
-            aladin_results = await aladin_search(f"{title} {author}".strip(), max_results=3)
-            for aladin_book in aladin_results:
-                if title.strip().lower() in aladin_book.title.strip().lower():
-                    from app.schemas.book import BookSearchResult
-                    book = await _save_new_book(db, aladin_book)
-                    if book:
-                        logger.info("[ask] 알라딘 검증 후 저장: '%s'", book.title)
-                        break
-        except Exception:
-            logger.warning("[ask] 알라딘 검색 실패: title='%s'", title)
+        # 시도 1: 제목 + 저자
+        search_queries = [f"{title} {author}", title]
+        for q in search_queries:
+            try:
+                aladin_results = await aladin_search(q.strip(), max_results=5)
+                for aladin_book in aladin_results:
+                    # 유연한 제목 매칭 (포함 관계 확인)
+                    if norm_title in normalize(aladin_book.title) or normalize(aladin_book.title) in norm_title:
+                        from app.schemas.book import BookSearchResult
+                        book = await _save_new_book(db, aladin_book)
+                        if book:
+                            logger.info("[ask] 알라딘 검증 성공('%s'): '%s'", q, book.title)
+                            break
+                if book: break
+            except Exception:
+                continue
 
-    if not book:
-        return empty
+    if book:
+        return {
+            "book_id": str(book.id),
+            "title": book.title,
+            "author": book.author or author,
+            "isbn": book.isbn or "",
+            "cover_image_url": book.cover_image_url or "",
+            "description": book.description or "",
+            "genre": book.genre or "",
+        }
 
-    return {
-        "book_id": str(book.id),
-        "title": book.title,
-        "author": book.author or author,
-        "isbn": book.isbn or "",
-        "cover_image_url": book.cover_image_url or "",
-        "description": book.description or "",
-        "genre": book.genre or "",
-    }
+    # 검증 실패 시 원본 LLM 제안 데이터 반환 (UI에서 표시 가능하도록)
+    return result_data
 
 
 def _to_response(r: dict) -> RecommendationResponse:

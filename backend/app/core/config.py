@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # AI APIs
     OPENAI_API_KEY: str | None = None
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    TAVILY_API_KEY: str | None = None
 
     # App
     APP_ENV: str = "development"
