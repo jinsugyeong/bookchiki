@@ -1,6 +1,17 @@
 /* Pretendard - 한국어 친화적 모던 sans-serif */
 @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+/* 나눔고딕 */
+@import url("https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap");
 @import "tailwindcss";
+
+/* 리디바탕 */
+@font-face {
+  font-family: 'RIDIBatang';
+  src: url('/fonts/RIDIBatang.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   /* ── 배경 컬러 시스템 ── */
