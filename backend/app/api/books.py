@@ -115,8 +115,23 @@ async def create_book(
     # Check for duplicate ISBN
     if book_in.isbn:
         existing = await db.execute(select(Book).where(Book.isbn == book_in.isbn))
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Book with this ISBN already exists")
+        found = existing.scalar_one_or_none()
+        if found:
+            return found
+
+    # Check for duplicate by title + author if ISBN is not provided or not found
+    if book_in.title and book_in.author:
+        first_author = book_in.author.split(",")[0].split("(")[0].strip()
+        existing = await db.execute(
+            select(Book).where(
+                Book.title.ilike(book_in.title.strip()),
+                Book.author.ilike(f"%{first_author}%"),
+            )
+        )
+        found = existing.scalar_one_or_none()
+        if found:
+            logger.info("[books] 중복 책 감지 (title+author) → 기존 반환: '%s'", book_in.title)
+            return found
 
     book = Book(**book_in.model_dump())
     db.add(book)

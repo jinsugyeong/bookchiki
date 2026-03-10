@@ -188,6 +188,19 @@ async def import_csv(
             result = await db.execute(select(Book).where(Book.isbn == isbn))
             book = result.scalar_one_or_none()
 
+        # If not found by ISBN, try title + author
+        if book is None and title and author:
+            first_author = author.split(",")[0].split("(")[0].strip()
+            result = await db.execute(
+                select(Book).where(
+                    Book.title.ilike(title.strip()),
+                    Book.author.ilike(f"%{first_author}%"),
+                )
+            )
+            book = result.scalar_one_or_none()
+            if book:
+                logger.info("[import] Found existing book by title+author: '%s'", title)
+
         if book is None:
             book = Book(
                 title=title,
@@ -209,6 +222,23 @@ async def import_csv(
                 if existing_book:
                     logger.info("[import] ISBN %s from enrichment already exists (book '%s'), reusing",
                                 book.isbn, existing_book.title)
+                    book = existing_book
+                else:
+                    db.add(book)
+                    await db.flush()
+                    new_books.append(book)
+            elif not book.isbn:
+                # Still no ISBN, try title+author again just in case enrichment updated them
+                first_author = book.author.split(",")[0].split("(")[0].strip()
+                existing_by_ta = await db.execute(
+                    select(Book).where(
+                        Book.title.ilike(book.title.strip()),
+                        Book.author.ilike(f"%{first_author}%"),
+                    )
+                )
+                existing_book = existing_by_ta.scalar_one_or_none()
+                if existing_book:
+                    logger.info("[import] Book '%s' already exists (title+author), reusing", book.title)
                     book = existing_book
                 else:
                     db.add(book)
