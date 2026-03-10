@@ -28,3 +28,4 @@ class User(Base):
     )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     dismissed_books: Mapped[list["UserDismissedBook"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    ask_histories: Mapped[list["AskHistory"]] = relationship(back_populates="user", cascade="all, delete-orphan")

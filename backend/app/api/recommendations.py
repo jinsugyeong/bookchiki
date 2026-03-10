@@ -17,6 +17,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.book import Book
 from app.models.user_dismissed_book import UserDismissedBook
+from app.models.ask_history import AskHistory
 from app.schemas.recommendation import (
     RecommendationListResponse,
     RecommendationResponse,
@@ -27,6 +28,7 @@ from app.schemas.recommendation import (
     PipelineStatusResponse,
     SeedStatusResponse,
     IndexStatusResponse,
+    AskHistoryResponse,
 )
 from app.services.recommend import get_recommendations
 from app.services.rag import search_knowledge
@@ -77,7 +79,7 @@ async def ask_recommendations(
 ):
     """질문 기반 추천: 자연어 질문 + 취향 프로필 컨텍스트 → RAG 검색 → LLM 추천.
 
-    DB 저장 없음, 추천 캐시 overwrite 없음.
+    관리자용 질문/결과 이력 저장됨.
     """
     # 1단계: 취향 프로필 조회 (is_dirty 무관)
     profile = await get_or_create_profile(db, current_user.id)
@@ -142,6 +144,15 @@ async def ask_recommendations(
         "[ask] user=%s question='%s' results=%d",
         current_user.id, request.question, len(results),
     )
+
+    # 관리자용 이력 저장
+    history = AskHistory(
+        user_id=current_user.id,
+        question=request.question,
+        results=[r.model_dump() for r in results]
+    )
+    db.add(history)
+    await db.commit()
 
     return AskResponse(results=results, total=len(results), question=request.question)
 
@@ -463,3 +474,18 @@ async def seed_books(
         skipped=result.skipped,
         errors=result.errors,
     )
+
+
+@admin_router.get("/ask-history", response_model=list[AskHistoryResponse])
+async def get_ask_history(
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """모든 사용자의 질문 기반 추천 이력 조회 (관리자)."""
+    # TODO: 관리자 권한 체크 로직 (예: current_user.is_admin)
+    result = await db.execute(
+        select(AskHistory).order_by(AskHistory.created_at.desc()).limit(limit)
+    )
+    histories = result.scalars().all()
+    return histories
