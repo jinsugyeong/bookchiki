@@ -1,6 +1,7 @@
 import axios from "axios";
 import type {
   Book,
+  User,
   UserBook,
   AladinBook,
   ReadingStats,
@@ -133,6 +134,12 @@ export const refreshAccessToken = async (refreshToken: string): Promise<string> 
 /** 로그아웃 — Refresh Token 서버 폐기 */
 export const logoutApi = async (refreshToken: string): Promise<void> => {
   await api.post("/auth/logout", { refresh_token: refreshToken });
+};
+
+/** 프로필 업데이트 (인스타그램 계정명 등) */
+export const updateMyProfile = async (payload: { instagram_username?: string | null }): Promise<User> => {
+  const { data } = await api.patch("/auth/me", payload);
+  return data;
 };
 
 /** 계정 탈퇴 (모든 데이터 삭제) */

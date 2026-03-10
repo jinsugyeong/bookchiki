@@ -13,9 +13,11 @@ import {
   Trash2,
   AlertTriangle,
   X,
+  Instagram,
+  Pencil,
 } from "lucide-react";
 import Image from "next/image";
-import { importCSV, getUserProfile, deleteAccount } from "@/lib/api";
+import { importCSV, getUserProfile, deleteAccount, updateMyProfile } from "@/lib/api";
 import type { ImportResult } from "@/lib/types";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -42,6 +44,9 @@ export default function MyPage() {
 
       {/* 프로필 카드 */}
       <ProfileCard />
+
+      {/* 인스타그램 계정 */}
+      <InstagramSection />
 
       {/* 취향 프로필 */}
       <TasteProfile />
@@ -113,6 +118,135 @@ function ProfileCard() {
           <LogOut size={13} />
           로그아웃
         </button>
+      )}
+    </div>
+  );
+}
+
+/** 인스타그램 계정 등록 섹션 */
+function InstagramSection() {
+  const { user, updateUser } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [error, setError] = useState("");
+
+  const updateMutation = useMutation({
+    mutationFn: (instagram_username: string | null) => updateMyProfile({ instagram_username }),
+    onSuccess: (data) => {
+      updateUser({ instagram_username: data.instagram_username });
+      setEditing(false);
+      setError("");
+    },
+    onError: (err: any) => {
+      setError(err?.response?.data?.detail ?? "저장에 실패했어요. 다시 시도해주세요.");
+    },
+  });
+
+  const handleEdit = () => {
+    setInputValue(user?.instagram_username ?? "");
+    setError("");
+    setEditing(true);
+  };
+
+  const handleSave = () => {
+    const trimmed = inputValue.trim().replace(/^@/, "");
+    updateMutation.mutate(trimmed || null);
+  };
+
+  const handleDelete = () => {
+    updateMutation.mutate(null);
+  };
+
+  return (
+    <div className="card p-5 flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Instagram size={16} style={{ color: "var(--accent)" }} />
+        <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+          북스타그램 계정
+        </h2>
+      </div>
+
+      <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+        이미지 생성 시 하단에 표시될 인스타그램 계정명을 등록해요.
+      </p>
+
+      {editing ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium" style={{ color: "var(--text-muted)" }}>@</span>
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => { setInputValue(e.target.value.replace(/^@/, "")); setError(""); }}
+              placeholder="instagram_id"
+              maxLength={30}
+              autoFocus
+              className="flex-1 px-3 py-2 rounded-xl text-sm"
+              style={{
+                background: "var(--bg-subtle)",
+                border: `1px solid ${error ? "#EF4444" : "var(--accent)"}`,
+                color: "var(--text-primary)",
+                outline: "none",
+              }}
+            />
+          </div>
+          {error && <p className="text-xs" style={{ color: "#EF4444" }}>{error}</p>}
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setError(""); }}
+              disabled={updateMutation.isPending}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium cursor-pointer"
+              style={{ background: "var(--bg-subtle)", color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={updateMutation.isPending}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
+              style={{ background: "var(--accent)", color: "white", border: "none" }}
+            >
+              {updateMutation.isPending ? "저장 중..." : "저장"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          {user?.instagram_username ? (
+            <div className="flex items-center gap-2">
+              <span
+                className="px-3 py-1.5 rounded-xl text-sm font-medium"
+                style={{ background: "var(--accent-light)", color: "var(--accent-dark)" }}
+              >
+                @{user.instagram_username}
+              </span>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={updateMutation.isPending}
+                className="text-xs cursor-pointer"
+                style={{ color: "var(--text-muted)" }}
+              >
+                삭제
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              미등록
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={handleEdit}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium cursor-pointer"
+            style={{ color: "var(--accent-dark)", background: "var(--accent-light)", border: "1px solid #FDE68A" }}
+          >
+            <Pencil size={11} />
+            {user?.instagram_username ? "수정" : "등록"}
+          </button>
+        </div>
       )}
     </div>
   );
