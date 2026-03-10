@@ -13,6 +13,7 @@ import {
   MessageCircle,
   TrendingUp,
   Upload,
+  Camera,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import StatsDashboard from "@/components/home/StatsDashboard";
@@ -159,6 +160,9 @@ function LandingHome() {
       {/* 섹션 3: 스마트 서재 */}
       <LibrarySection />
 
+      {/* 섹션 3.5: 북스타그램 이미지 생성 (신규 추가) */}
+      <ImageGenerationSection />
+
       {/* 섹션 4: AI 추천 */}
       <AISection />
 
@@ -256,6 +260,13 @@ function FeaturesSection() {
       bg: "var(--accent-light)",
     },
     {
+      icon: Camera,
+      title: "북스타그램 생성",
+      desc: "감명 깊은 문장을 예쁜 카드로 자동 제작",
+      color: "var(--status-reading)",
+      bg: "var(--status-reading-bg)",
+    },
+    {
       icon: Star,
       title: "AI 맞춤 추천",
       desc: "취향 분석 & 자유로운 질문으로 딱 맞는 책",
@@ -287,9 +298,12 @@ function FeaturesSection() {
           이런 기능이 있습니다
         </h2>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="flex flex-wrap justify-center gap-3 md:gap-4 max-w-5xl mx-auto">
         {features.map(({ icon: Icon, title, desc, color, bg }) => (
-          <div key={title} className="card p-5 flex flex-col gap-3">
+          <div 
+            key={title} 
+            className="card p-5 flex flex-col gap-3 w-[calc(50%-6px)] md:w-[calc(33.333%-11px)] lg:w-[calc(30%)] min-h-[140px]"
+          >
             <div
               className="w-10 h-10 rounded-2xl flex items-center justify-center"
               style={{ background: bg }}
@@ -461,6 +475,82 @@ function LibrarySection() {
             다 읽은 책, 읽고 있는 책을 나누어 보관하고 별점과
             나만의 독서 메모를 남겨 기록을 풍성하게 채울 수 있습니다.
           </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** 섹션 3.5: 북스타그램 이미지 생성 */
+function ImageGenerationSection() {
+  return (
+    <section className="py-16 md:py-24">
+      <div className="flex flex-col md:flex-row items-center gap-10 md:gap-16">
+        {/* 텍스트 (왼쪽) */}
+        <div className="flex flex-col gap-5 md:w-2/5 order-2 md:order-1">
+          <div
+            className="badge w-fit"
+            style={{ background: "var(--status-reading-bg)", color: "var(--status-reading)" }}
+          >
+            <Camera size={11} />
+            북스타그램 이미지 생성
+          </div>
+          <h2
+            className="text-2xl md:text-3xl font-extrabold leading-snug"
+            style={{ color: "var(--text-primary)" }}
+          >
+            기억하고 싶은 문장을<br />한 장의 이미지로 기록하세요.
+          </h2>
+          <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+            책 속의 소중한 문장들을 그냥 지나치지 마세요.<br />
+            클릭 몇 번으로 인스타그램에 바로 올릴 수 있는<br />
+            감성적인 공유 이미지를 자동으로 만들어 드립니다.
+          </p>
+        </div>
+
+        {/* 이미지 (오른쪽) */}
+        <div className="md:w-3/5 order-1 md:order-2 relative">
+          {/* 메인: 이미지 생성 도구 */}
+          <div
+            className="rounded-2xl overflow-hidden shadow-lg"
+            style={{ border: "1px solid var(--border-default)" }}
+          >
+            <Image
+              src="/captures/image-gen.png"
+              alt="북스타그램 이미지 생성 도구"
+              width={800}
+              height={500}
+              className="w-full h-auto"
+              unoptimized
+            />
+          </div>
+          {/* 오버레이: 결과물 하이라이트 */}
+          <div
+            className="absolute hidden md:block"
+            style={{
+              bottom: "-32px",
+              right: "-20px",
+              width: "42%",
+              border: "1.5px solid var(--border-default)",
+              borderRadius: "16px",
+              overflow: "hidden",
+              boxShadow: "0 12px 32px rgba(28,25,23,0.18)",
+            }}
+          >
+            <Image
+              src="/captures/image-gen-highlight.png"
+              alt="생성된 카드 이미지"
+              width={400}
+              height={400}
+              className="w-full h-auto"
+              unoptimized
+            />
+          </div>
+          
+          {/* 모바일: 하단에 추가 이미지 */}
+          <div className="md:hidden mt-3 rounded-xl overflow-hidden" style={{ border: "1px solid var(--border-default)" }}>
+            <Image src="/captures/image-gen-highlight.png" alt="생성된 카드 이미지" width={400} height={400} className="w-full h-auto" unoptimized />
+          </div>
         </div>
       </div>
     </section>
