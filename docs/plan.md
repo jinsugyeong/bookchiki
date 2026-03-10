@@ -257,32 +257,31 @@ RAG 데이터(thread_review.json) + DB user_books
 - [x] 환경 변수 설정 (`NEXT_PUBLIC_API_URL=http://localhost:8000`)
 - [x] API 통합 (TanStack Query v5로 자동 캐싱/리페칭)
 
-### Phase 6 — 북스타그램 이미지 생성 ⏳ 예정
+### Phase 6 — 북스타그램 이미지 생성 ✅ 완료
 
-#### 이미지 생성 API 후보 (미결정)
-| 옵션 | 비용 | 비고 |
-|------|------|------|
-| **Pollinations.ai** | 무료 | API 키 불필요, GET 요청으로 즉시 생성, 상업 이용 가능 → **1순위** |
-| Hugging Face Inference API | 무료 티어 | FLUX.1-schnell, rate limit 있음 |
-| Replicate | ~$0.002/장 | SDXL·FLUX 선택 가능, 종량제 |
-| DALL-E 3 | $0.04/장 | 품질 최상, 비용 높음 |
+#### 이미지 생성 전략 (DALL-E 3)
+- 유저당 일일 최대 3회 제한 (DB 트래킹)
+- 책 정보(제목, 저자, 장르, 설명) 기반 atmospheric 배경 이미지 생성
+- 텍스트 없는 순수 배경 스타일로 생성하여 overlay 편집 용이성 확보
 
-#### 구현 태스크
-- [ ] 이미지 생성 API 최종 선택 및 연동
-- [ ] `extract_book_quote` — 하이라이트/메모에서 핵심 문구 추출
-- [ ] `generate_image_prompt` — 카드 이미지 프롬프트 생성
-- [ ] `create_image` — 이미지 생성 + 저장 (S3 또는 로컬)
-- [ ] Canvas 기반 텍스트 편집 에디터 (문구 / 폰트 / 색상)
-- [ ] `image_versions` 테이블로 버전 관리
+#### 구현 태스크 ✅ 완료
+- [x] `backend/app/api/images.py` — DALL-E 3 연동 배경 이미지 생성 API
+- [x] `GenerateBackgroundRequest/Response` 스키마 정의
+- [x] `DAILY_LIMIT=3` 정책 및 UTC 기준 일일 카운트 로직 (`_count_today_generations`)
+- [x] 프론트엔드: Canvas 기반 텍스트 편집 에디터 및 이미지 다운로드 기능 (`frontend/hooks/useImageExport.ts` 등)
+- [x] `GeneratedImage` 모델로 생성 이력 관리
+- [x] `GET /images/daily-remaining` — 남은 횟수 조회 API
+- [x] `POST /images/generate-background` — 배경 생성 API (DALL-E 3)
+- [x] 비로그인 랜딩 페이지 홍보 섹션 추가 및 레이아웃 최적화 (3+2 구도)
 
 ---
 
 ## 비용 관리 전략
 
-- 이미지 생성은 하루 N회 제한 로직 추가 (DB에 daily_count 트래킹)
+- 이미지 생성은 유저당 하루 3회 제한 (DALL-E 3 비용 관리)
 - OpenSearch는 개발 중 로컬 Docker로 대체, 배포 시에만 AWS 사용
-- Claude API 호출에 캐싱 레이어 추가 (같은 책 재요청 시 재사용)
-- S3 이미지는 30일 후 자동 삭제 정책 (비용 절감)
+- OpenAI API 호출 결과(추천 결과)는 DB 캐싱 레이어 활용
+- S3 이미지(수정본 등)는 30일 후 자동 삭제 정책 예정 (비용 절감)
 
 ---
 

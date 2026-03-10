@@ -1,6 +1,6 @@
 # API 엔드포인트 레퍼런스
 
-마지막 업데이트: 2026-03-09 (Dismiss 기능 + 알라딘 실시간 보완 + 자정 배치 스케줄러 추가)
+마지막 업데이트: 2026-03-10 (북스타그램 이미지 생성 기능 구현)
 
 이 문서는 Bookchiki 백엔드의 모든 API 엔드포인트를 설명합니다.
 
@@ -719,6 +719,63 @@ GET /recommendations?limit=10
 
 ---
 
+## 이미지 생성 (Images)
+
+### GET `/images/daily-remaining`
+
+현재 사용자의 오늘 남은 AI 배경 이미지 생성 횟수를 조회합니다.
+
+**응답 (200):**
+
+```json
+{
+  "remaining": 2,
+  "limit": 3
+}
+```
+
+**동작:**
+- 오늘(UTC 기준) 생성한 `ai_background` 스타일 이미지 수를 카운트하여 남은 횟수 반환.
+
+---
+
+### POST `/images/generate-background`
+
+DALL-E 3를 사용하여 책 분위기에 맞는 AI 배경 이미지를 생성합니다.
+
+**요청:**
+
+```json
+{
+  "book_id": "book-id-1",
+  "title": "클린 코드",
+  "author": "Robert C. Martin",
+  "genre": "프로그래밍",
+  "description": "애자일 소프트웨어 장인 정신..."
+}
+```
+
+**응답 (200):**
+
+```json
+{
+  "image_url": "https://openai-generated-url...",
+  "remaining_today": 1
+}
+```
+
+**동작:**
+1. 일일 생성 한도(3회) 체크
+2. 책 정보를 바탕으로 최적화된 배경 이미지 프롬프트 생성 (텍스트 제외 스타일)
+3. DALL-E 3 API 호출
+4. 생성 이력을 `generated_images` 테이블에 저장
+5. 생성된 이미지 URL과 남은 횟수 반환
+
+**에러:**
+- `429 Too Many Requests` — 일일 생성 한도 초과
+- `502 Bad Gateway` — OpenAI API 호출 실패
+
+---
 
 ## CSV 가져오기 (Imports)
 
