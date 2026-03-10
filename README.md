@@ -62,18 +62,21 @@ false           true
 
 ### 시스템 2 — 자연어 질문 기반 맞춤 추천
 
-저장된 취향 프로필과 지식 베이스를 활용하여 자유 질문에 맞는 맞춤 추천을 제공.
+취향 프로필 + RAG 지식 + **실시간 웹 검색(Tavily)**을 결합하여 질문에 맞는 **검증된 실존 도서**만 추천.
 
 ```
 POST /recommendations/ask  { "question": "감동적인 가족 이야기 추천해줘" }
         │
 user_preference_profiles.profile_data 조회
         │
-rag_knowledge 인덱스에서 관련 정보 하이브리드 검색 (BM25 + KNN)
+├─ rag_knowledge 인덱스 하이브리드 검색 (BM25 + KNN)
+└─ Tavily Web Search (실시간 웹 검색으로 최신/실존 후보 확보)
         │
-취향 프로필 + 질문 + 검색 결과 → LLM이 맞춤 추천 생성
+취향 프로필 + RAG 데이터 + 웹 검색 후보 → LLM 선별 (10권 후보 생성)
         │
-취향 프로필 기반 추천 + AI 설명 반환 (캐시 overwrite 없음)
+알라딘 API 엄격 검증 (Strict Validation)
+        │
+실존하는 진짜 책 3권 확정 + AI 추천 사유 반환
 ```
 
 ## 빠른 시작
