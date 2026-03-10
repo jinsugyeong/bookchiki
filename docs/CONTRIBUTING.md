@@ -1,6 +1,6 @@
 # 개발 가이드
 
-마지막 업데이트: 2026-03-03 (Phase 5 프론트엔드 완료 + Refresh Token 구현)
+마지막 업데이트: 2026-03-10 (참고 문서 경로 수정)
 
 이 문서는 Bookchiki 프로젝트의 개발 환경 세팅, 실행 방법, 그리고 테스트 방법을 설명합니다.
 
@@ -338,6 +338,6 @@ elasticsearch.exceptions.TransportError: Connection refused
 
 ## 다음 단계
 
-1. [API.md](./API.md) — API 엔드포인트 상세 레퍼런스
-2. [ENV.md](./ENV.md) — 환경변수 전체 목록
+1. [API.md](./docs/API.md) — API 엔드포인트 상세 레퍼런스
+2. [ENV.md](./docs/ENV.md) — 환경변수 전체 목록
 3. [CLAUDE.md](../CLAUDE.md) — 프로젝트 아키텍처 개요
