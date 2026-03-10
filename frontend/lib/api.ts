@@ -299,6 +299,38 @@ export const getUserProfile = async (): Promise<UserProfile> => {
   return data;
 };
 
+// ── AI 이미지 생성 ──────────────────────────────────────────────────────────────
+
+export interface AiGenerateRequest {
+  book_id: string;
+  title: string;
+  author: string;
+  genre?: string;
+  description?: string;
+}
+
+export interface AiGenerateResponse {
+  image_url: string;
+  remaining_today: number;
+}
+
+export interface DailyRemainingResponse {
+  remaining: number;
+  limit: number;
+}
+
+/** AI 배경 이미지 생성 (DALL-E 3, 하루 3회 제한) */
+export const generateAiBackground = async (req: AiGenerateRequest): Promise<AiGenerateResponse> => {
+  const { data } = await api.post("/images/generate-background", req);
+  return data;
+};
+
+/** 오늘 남은 AI 생성 횟수 조회 */
+export const getAiGenerationRemaining = async (): Promise<DailyRemainingResponse> => {
+  const { data } = await api.get("/images/daily-remaining");
+  return data;
+};
+
 // ── CSV 임포트 ─────────────────────────────────────────────────────────────────
 
 /** CSV 파일 임포트 (multipart/form-data) */
