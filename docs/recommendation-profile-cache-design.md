@@ -134,25 +134,29 @@ recommendations  전체 파이프라인 실행
       응답
 ```
 
-### 5-2. 질문 기반 추천 (신규)
+### 5-2. 질문 기반 추천 — 시스템 2
 
 ```
 POST /recommendations/ask
 { "question": "감동적인 가족 이야기 추천해줘" }
         │
         ▼
-user_preference_profiles에서
-  profile_data 조회 (is_dirty 무관)
+1. 취향 프로필(profile_data) 및 RAG(OpenSearch) 컨텍스트 수집
         │
         ▼
-LLM 호출 시 취향 프로필을 컨텍스트로 주입
-  - preference_summary
-  - preferred_genres / disliked_genres
-  - top_rated_books
+2. 실시간 웹 검색 (Tavily API)
+   - 질문 기반 최신/실존 도서 후보(Web Context) 확보
         │
         ▼
-맞춤 추천 결과 반환
-(캐시 overwrite 없음 — 별도 응답)
+3. LLM 선별 호출 (Search-Augmented Generation)
+   - 취향 + RAG + 웹 검색 결과를 종합하여 10권의 후보 선별
+        │
+        ▼
+4. 알라딘 엄격 검증 (Strict Aladin Validation)
+   - 제목+저자 기반 알라딘 API 검색 → 100% 실존 도서만 통과
+        │
+        ▼
+5. 최종 3권 확정 및 응답 (캐시 overwrite 없음)
 ```
 
 ---
