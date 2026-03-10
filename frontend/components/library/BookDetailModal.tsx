@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { X, BookOpen, Trash2, Save, Highlighter, Plus, Camera } from "lucide-react";
-import type { UserBook } from "@/lib/types";
-import { updateUserBook, deleteUserBook, addHighlight } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X, BookOpen, Trash2, Save, Highlighter, Plus, Camera, Pencil, Check } from "lucide-react";
+import type { UserBook, Highlight } from "@/lib/types";
+import { updateUserBook, deleteUserBook, addHighlight, getHighlights, deleteHighlight, updateHighlight } from "@/lib/api";
 import StarRating from "@/components/ui/StarRating";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 
@@ -29,12 +30,17 @@ const STATUS_LABELS = [
 /** 책 상세 + 편집 모달 */
 export default function BookDetailModal({ userBook, onClose }: Props) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [status, setStatus] = useState(userBook.status);
   const [rating, setRating] = useState(userBook.rating ?? 0);
   const [memo, setMemo] = useState(userBook.memo ?? "");
   const [highlights, setHighlights] = useState<HighlightEntry[]>([]);
   const [isDirty, setIsDirty] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [editingHighlightId, setEditingHighlightId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
+  const [editingNote, setEditingNote] = useState("");
+  const [editingPage, setEditingPage] = useState("");
 
   const updateMutation = useMutation({
     mutationFn: async () => {
@@ -70,6 +76,54 @@ export default function BookDetailModal({ userBook, onClose }: Props) {
       queryClient.invalidateQueries({ queryKey: ["myStats"] });
       onClose();
     },
+  });
+
+  const deleteHighlightMutation = useMutation({
+    mutationFn: (highlightId: string) => deleteHighlight(highlightId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["highlights", userBook.id] });
+    },
+  });
+
+  const updateHighlightMutation = useMutation({
+    mutationFn: ({ id, content, note, page }: { id: string; content: string; note?: string; page?: number }) =>
+      updateHighlight(id, { content, note, page }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["highlights", userBook.id] });
+      setEditingHighlightId(null);
+      setEditingContent("");
+      setEditingNote("");
+      setEditingPage("");
+    },
+  });
+
+  const handleEditStart = (h: Highlight) => {
+    setEditingHighlightId(h.id);
+    setEditingContent(h.content);
+    setEditingNote(h.note ?? "");
+    setEditingPage(h.page ? String(h.page) : "");
+  };
+
+  const handleEditSave = (id: string) => {
+    if (!editingContent.trim()) return;
+    updateHighlightMutation.mutate({
+      id,
+      content: editingContent.trim(),
+      note: editingNote.trim() || undefined,
+      page: editingPage ? parseInt(editingPage, 10) : undefined,
+    });
+  };
+
+  const handleEditCancel = () => {
+    setEditingHighlightId(null);
+    setEditingContent("");
+    setEditingNote("");
+    setEditingPage("");
+  };
+
+  const { data: savedHighlights = [] } = useQuery<Highlight[]>({
+    queryKey: ["highlights", userBook.id],
+    queryFn: () => getHighlights(userBook.id),
   });
 
   const handleStatusChange = (v: typeof status) => {
@@ -256,7 +310,10 @@ export default function BookDetailModal({ userBook, onClose }: Props) {
               </p>
               <button
                 type="button"
-                onClick={() => alert("현재 준비중인 서비스입니다.")}
+                onClick={() => {
+                  onClose();
+                  router.push(`/create-image/${userBook.id}`);
+                }}
                 className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer"
                 style={{
                   color: "var(--accent-dark)",
@@ -306,6 +363,128 @@ export default function BookDetailModal({ userBook, onClose }: Props) {
               </button>
             </div>
 
+            {/* 저장된 하이라이트 목록 */}
+            {savedHighlights.length > 0 && (
+              <div className="flex flex-col gap-2 mb-3">
+                {savedHighlights.map((h) => (
+                  <div
+                    key={h.id}
+                    className="flex flex-col gap-2 px-3 py-2.5 rounded-2xl"
+                    style={{ background: "var(--accent-light)", border: "1px solid #FDE68A" }}
+                  >
+                    {editingHighlightId === h.id ? (
+                      /* 편집 모드 */
+                      <>
+                        <textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          rows={3}
+                          autoFocus
+                          className="w-full px-2.5 py-2 text-xs rounded-xl resize-none"
+                          style={{
+                            background: "var(--bg-card)",
+                            border: "1px solid var(--accent)",
+                            color: "var(--text-primary)",
+                            outline: "none",
+                          }}
+                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={editingNote}
+                            onChange={(e) => setEditingNote(e.target.value)}
+                            placeholder="메모 (선택)"
+                            className="flex-1 px-2.5 py-1.5 text-xs rounded-xl"
+                            style={{
+                              background: "var(--bg-card)",
+                              border: "1px solid var(--border-default)",
+                              color: "var(--text-primary)",
+                              outline: "none",
+                            }}
+                            onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+                            onBlur={(e) => (e.target.style.borderColor = "var(--border-default)")}
+                          />
+                          <input
+                            type="number"
+                            value={editingPage}
+                            onChange={(e) => setEditingPage(e.target.value)}
+                            placeholder="페이지"
+                            min={1}
+                            className="w-20 px-2.5 py-1.5 text-xs rounded-xl"
+                            style={{
+                              background: "var(--bg-card)",
+                              border: "1px solid var(--border-default)",
+                              color: "var(--text-primary)",
+                              outline: "none",
+                            }}
+                            onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+                            onBlur={(e) => (e.target.style.borderColor = "var(--border-default)")}
+                          />
+                        </div>
+                        <div className="flex gap-1.5 justify-end">
+                          <button
+                            type="button"
+                            onClick={handleEditCancel}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] cursor-pointer"
+                            style={{ background: "var(--bg-subtle)", color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+                          >
+                            취소
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEditSave(h.id)}
+                            disabled={!editingContent.trim() || updateHighlightMutation.isPending}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold cursor-pointer"
+                            style={{ background: "var(--accent)", color: "white", border: "none" }}
+                          >
+                            {updateHighlightMutation.isPending ? <LoadingSpinner size={10} /> : <Check size={10} />}
+                            저장
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      /* 보기 모드 */
+                      <div className="flex items-start gap-2">
+                        <Highlighter size={12} style={{ color: "var(--accent-dark)", flexShrink: 0, marginTop: "2px" }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--text-primary)" }}>
+                            {h.content}
+                          </p>
+                          {(h.note || h.page) && (
+                            <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                              {h.note && <span>{h.note}</span>}
+                              {h.note && h.page && <span> · </span>}
+                              {h.page && <span>p.{h.page}</span>}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleEditStart(h)}
+                            className="p-1 rounded-lg transition-colors cursor-pointer"
+                            style={{ color: "var(--accent-dark)" }}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteHighlightMutation.mutate(h.id)}
+                            disabled={deleteHighlightMutation.isPending}
+                            className="p-1 rounded-lg transition-colors cursor-pointer"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 새 하이라이트 입력 폼 */}
             {highlights.length === 0 ? (
               <button
                 type="button"
