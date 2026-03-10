@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api import auth, books, user_books, highlights, imports
+from app.api import auth, books, user_books, highlights, imports, images
 from app.api.recommendations import router as recommendations_router, admin_router
 from app.services.scheduler import start_scheduler, stop_scheduler
 
@@ -66,6 +66,7 @@ app.include_router(books.router)
 app.include_router(user_books.router)
 app.include_router(highlights.router)
 app.include_router(imports.router)
+app.include_router(images.router)
 app.include_router(recommendations_router)
 app.include_router(admin_router)
 
