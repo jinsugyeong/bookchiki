@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스
 
-마지막 업데이트: 2026-03-03
+마지막 업데이트: 2026-03-12
 
 이 문서는 `backend/.env` 파일의 모든 환경변수를 설명합니다.
 
@@ -26,6 +26,8 @@
 | `JWT_SECRET_KEY` | JWT 서명 키 (보안 필수) | 임의의 긴 문자열 | String |
 | `ALADIN_API_KEY` | 알라딘 TTB API 키 | `ttbkor...` | String |
 | `OPENAI_API_KEY` | OpenAI API 키 (임베딩 및 추천 이유 생성용) | `sk-...` | String |
+| `TAVILY_API_KEY` | Tavily Search API 키 (질문 기반 실시간 도서 검색용) | `tvly-...` | String |
+| `OPENSEARCH_INITIAL_ADMIN_PASSWORD` | docker-composer.yml에 들어가는 암호키(8자 이상, 영문 대소문자, 숫자, 특수문자 포함) | B0@kchiki | String |
 
 ---
 
@@ -34,13 +36,14 @@
 | 환경변수 | 설명 | 기본값 | 형식 |
 |---------|------|--------|------|
 | `JWT_ALGORITHM` | JWT 서명 알고리즘 | `HS256` | String |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | 액세스 토큰 만료 시간 | `60` | Integer |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | 액세스 토큰 만료 시간 | `15` | Integer |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh Token 만료 시간 | `7` | Integer |
-| `OPENSEARCH_HOST` | OpenSearch 호스트 | `localhost` | String |
+| `OPENSEARCH_HOST` | OpenSearch 호스트 | `opensearch` | String |
 | `OPENSEARCH_PORT` | OpenSearch 포트 | `9200` | Integer |
 | `OPENAI_EMBEDDING_MODEL` | OpenAI 임베딩 모델 | `text-embedding-3-small` | String |
 | `APP_ENV` | 실행 환경 (`development` / `production`) | `development` | String |
 | `FRONTEND_URL` | 프론트엔드 URL (OAuth 콜백용) | `http://localhost:3000` | String |
+| `PG_HOST, PORT, ...` | 배포 환경에서 사용되는 PostgreSQL 정보들, postgres 백업 및 복구 스트립트에서 사용됨 | PG_HOST=your-rds-endpoint<BR>PG_PORT=5432<br>PG_USER=user<br>PG_DB=db<br>PG_PASSWORD=pass | |
 
 ---
 
@@ -55,39 +58,6 @@
 
 ---
 
-## 개발 환경 팁
-
-### 개발 환경에서 Google OAuth 설정
-
-모든 환경에서 실제 Google OAuth를 사용합니다. 개발 환경에서 Google 계정 없이 테스트하려면:
-
-```bash
-# .env에 설정
-GOOGLE_CLIENT_ID=dummy
-GOOGLE_CLIENT_SECRET=dummy
-APP_ENV=development
-```
-
-이 경우 Google 로그인 대신 프론트엔드의 테스트 모드나 API 문서(Swagger UI)에서 직접 토큰을 입력할 수 있습니다.
-
-### 로컬 OpenSearch 사용
-
-Docker 없이 로컬에서 OpenSearch를 실행 중이라면:
-
-```bash
-OPENSEARCH_HOST=127.0.0.1
-OPENSEARCH_PORT=9200
-```
-
-### 로컬 PostgreSQL 사용
-
-PostgreSQL이 로컬에 설치되어 있다면:
-
-```bash
-DATABASE_URL=postgresql+asyncpg://postgres:pass@localhost:5432/bookchiki
-```
-
----
 
 ## 환경별 설정 예시
 
@@ -95,15 +65,28 @@ DATABASE_URL=postgresql+asyncpg://postgres:pass@localhost:5432/bookchiki
 
 ```bash
 # .env
-DATABASE_URL=postgresql+asyncpg://user:pass@rds-host:5432/bookchiki
-GOOGLE_CLIENT_ID=dummy
-GOOGLE_CLIENT_SECRET=dummy
+DATABASE_URL=postgresql+asyncpg://user:pass@postgres:5432/bookchiki
+
+GOOGLE_CLIENT_ID=your-prod-google-id
+GOOGLE_CLIENT_SECRET=your-prod-google-secret
+
 JWT_SECRET_KEY=<64자 이상 난수>
+
 ALADIN_API_KEY=your-aladin-key
+
 OPENAI_API_KEY=your-openai-key
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+TAVILY_API_KEY=your-tavily-key
+
+AWS_ACCESS_KEY_ID=your-aws-key
+AWS_SECRET_ACCESS_KEY=your-aws-secret
+AWS_S3_BUCKET=bookchiki-images-prod
+AWS_REGION=ap-northeast-2
+
 OPENSEARCH_HOST=opensearch
 OPENSEARCH_PORT=9200
-APP_ENV=development
+OPENSEARCH_INITIAL_ADMIN_PASSWORD=your-opensearch-initial-admin-password
+
 FRONTEND_URL=http://localhost:3000
 ```
 
@@ -111,19 +94,34 @@ FRONTEND_URL=http://localhost:3000
 
 ```bash
 # .env (또는 환경변수로 주입)
-DATABASE_URL=postgresql+asyncpg://user:pass@rds-host:5432/bookchiki
+DATABASE_URL=postgresql+asyncpg://user:pass@your-rds-endpoint:5432/bookchiki
+
+PG_HOST=your-rds-endpoint
+PG_PORT=5432
+PG_USER=user
+PG_DB=db
+PG_PASSWORD=pass
+
 GOOGLE_CLIENT_ID=your-prod-google-id
 GOOGLE_CLIENT_SECRET=your-prod-google-secret
+
 JWT_SECRET_KEY=<64자 이상 난수>
+
 ALADIN_API_KEY=your-aladin-key
+
 OPENAI_API_KEY=your-openai-key
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+TAVILY_API_KEY=your-tavily-key
+
 AWS_ACCESS_KEY_ID=your-aws-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret
 AWS_S3_BUCKET=bookchiki-images-prod
 AWS_REGION=ap-northeast-2
-OPENSEARCH_HOST=opensearch-domain.us-east-1.aes.amazonaws.com
-OPENSEARCH_PORT=443
-APP_ENV=production
+
+OPENSEARCH_HOST=opensearch
+OPENSEARCH_PORT=9200
+OPENSEARCH_INITIAL_ADMIN_PASSWORD=your-opensearch-initial-admin-password
+
 FRONTEND_URL=https://bookchiki.com
 ```
 
