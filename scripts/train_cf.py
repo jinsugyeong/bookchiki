@@ -42,6 +42,7 @@ THREAD_REVIEW_PATH = PROJECT_ROOT / "output" / "thread_review.json"
 MODEL_DIR = PROJECT_ROOT / "backend" / "models"
 CF_MODEL_PATH = MODEL_DIR / "cf_model.npz"
 CF_MAPPING_PATH = MODEL_DIR / "cf_mapping.json"
+SYNTHETIC_CACHE_PATH = MODEL_DIR / "synthetic_interactions.json"
 
 
 def _get_db_url() -> str:
@@ -68,8 +69,8 @@ def load_thread_reviews() -> list[dict]:
         [{"post_num": str, "title": str}, ...]
     """
     if not THREAD_REVIEW_PATH.exists():
-        logger.error("[train_cf] thread_review.json not found: %s", THREAD_REVIEW_PATH)
-        sys.exit(1)
+        logger.warning("[train_cf] thread_review.json 없음: %s (Synthetic 데이터 없이 진행)", THREAD_REVIEW_PATH)
+        return []
 
     with open(THREAD_REVIEW_PATH, encoding="utf-8") as f:
         data = json.load(f)
@@ -78,7 +79,7 @@ def load_thread_reviews() -> list[dict]:
     return data
 
 
-async def load_db_data() -> tuple[dict[str, str], list[dict]]:
+async def load_db_data(fetch_books: bool = True) -> tuple[dict[str, str], list[dict]]:
     """단일 DB 연결로 books와 user_books를 순차 조회.
 
     Returns:
@@ -91,7 +92,9 @@ async def load_db_data() -> tuple[dict[str, str], list[dict]]:
     db_url = _get_db_url()
     conn = await asyncpg.connect(db_url)
     try:
-        book_rows = await conn.fetch("SELECT id::text, title FROM books")
+        book_rows = []
+        if fetch_books:
+            book_rows = await conn.fetch("SELECT id::text, title FROM books")
         ub_rows = await conn.fetch(
             "SELECT user_id::text, book_id::text, rating FROM user_books"
         )
@@ -170,6 +173,37 @@ def build_synthetic_interactions(
         len(interactions),
     )
     return interactions, match_count, total_count
+
+
+def save_synthetic_cache(interactions: list[tuple[str, str, float]]) -> None:
+    """synthetic interactions 캐시 저장."""
+    try:
+        with open(SYNTHETIC_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(interactions, f)
+        logger.info("[train_cf] Synthetic 캐시 저장: %s", SYNTHETIC_CACHE_PATH)
+    except Exception as e:
+        logger.warning("[train_cf] 캐시 저장 실패: %s", e)
+
+
+def load_synthetic_cache() -> list[tuple[str, str, float]] | None:
+    """캐시된 synthetic interactions 로드."""
+    if not SYNTHETIC_CACHE_PATH.exists():
+        return None
+
+    # thread_review.json 변경 시 캐시 무효화
+    if THREAD_REVIEW_PATH.exists() and SYNTHETIC_CACHE_PATH.stat().st_mtime < THREAD_REVIEW_PATH.stat().st_mtime:
+        logger.info("[train_cf] thread_review.json 변경됨 → 캐시 무시")
+        return None
+
+    try:
+        with open(SYNTHETIC_CACHE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        logger.info("[train_cf] Synthetic 캐시 로드: %d개 상호작용", len(data))
+        # JSON loads list of lists, convert to list of tuples
+        return [(item[0], item[1], float(item[2])) for item in data]
+    except Exception as e:
+        logger.warning("[train_cf] 캐시 로드 실패: %s", e)
+        return None
 
 
 def build_real_interactions(
@@ -311,21 +345,29 @@ def train_and_save(
     logger.info("[train_cf] 매핑 저장 완료: real_users=%d items=%d", len(real_user_map), len(item_map))
 
 
-async def _main_async(factors: int, iterations: int, regularization: float = 0.1) -> None:
+async def _main_async(factors: int, iterations: int, regularization: float = 0.1, use_cache: bool = True) -> None:
     """비동기 메인 실행."""
-    # 1. 데이터 로드 (단일 DB 연결로 books + user_books 순차 조회)
-    thread_reviews = load_thread_reviews()
-    title_to_book_id, db_user_books = await load_db_data()
+    synthetic_interactions = None
 
-    # 2. Synthetic 상호작용 생성
-    synthetic_interactions, match_count, total_count = build_synthetic_interactions(
-        thread_reviews, title_to_book_id
-    )
-    if match_count / max(total_count, 1) < 0.3:
-        logger.warning(
-            "[train_cf] 매핑률이 낮습니다 (%.1f%%). books 인덱싱 여부를 확인하세요.",
-            match_count / max(total_count, 1) * 100,
+    if use_cache:
+        synthetic_interactions = load_synthetic_cache()
+
+    # 1. 데이터 로드 (캐시 있으면 books 로드 생략)
+    need_books = synthetic_interactions is None
+    title_to_book_id, db_user_books = await load_db_data(fetch_books=need_books)
+
+    # 2. Synthetic 상호작용 생성 (캐시 없으면)
+    if synthetic_interactions is None:
+        thread_reviews = load_thread_reviews()
+        synthetic_interactions, match_count, total_count = build_synthetic_interactions(
+            thread_reviews, title_to_book_id
         )
+        if total_count > 0 and match_count / total_count < 0.3:
+            logger.warning(
+                "[train_cf] 매핑률이 낮습니다 (%.1f%%). books 인덱싱 여부를 확인하세요.",
+                match_count / total_count * 100,
+            )
+        save_synthetic_cache(synthetic_interactions)
 
     # 3. Real 상호작용 변환
     real_interactions = build_real_interactions(db_user_books)
@@ -350,9 +392,10 @@ def main() -> None:
     parser.add_argument("--factors", type=int, default=64, help="ALS 잠재 요인 수 (기본값: 64)")
     parser.add_argument("--iterations", type=int, default=20, help="ALS 반복 횟수 (기본값: 20)")
     parser.add_argument("--regularization", type=float, default=0.1, help="ALS 정규화 계수 (기본값: 0.1)")
+    parser.add_argument("--no-cache", action="store_true", help="Synthetic 캐시 사용 안 함 (강제 재계산)")
     args = parser.parse_args()
 
-    asyncio.run(_main_async(factors=args.factors, iterations=args.iterations, regularization=args.regularization))
+    asyncio.run(_main_async(args.factors, args.iterations, args.regularization, use_cache=not args.no_cache))
 
 
 if __name__ == "__main__":
