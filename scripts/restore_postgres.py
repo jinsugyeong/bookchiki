@@ -13,6 +13,7 @@ SQL 덤프 파일에서 PostgreSQL DB 복원.
 
 import argparse
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,12 +25,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Docker 서비스 / DB 접속 정보
+# DB 접속 정보. 환경 변수에서 읽어오며, 없으면 개발용 기본값을 사용합니다.
+# 운영 환경(EC2)에서는 .env 파일 등을 통해 환경 변수를 설정해야 합니다.
 PG_SERVICE = "postgres"
-PG_USER = "bookchiki"
-PG_DB = "bookchiki"
-PG_HOST = "localhost"
-PG_PORT = "5432"
+PG_HOST = os.getenv("PG_HOST", "localhost")
+PG_PORT = os.getenv("PG_PORT", "5432")
+PG_USER = os.getenv("PG_USER", "bookchiki")
+PG_DB = os.getenv("PG_DB", "bookchiki")
+PG_PASSWORD = os.getenv("PG_PASSWORD", "bookchiki") # 개발용 기본값. 운영에서는 반드시 환경변수 설정.
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -114,7 +117,8 @@ def restore_via_psql(backup_path: Path) -> bool:
     try:
         result = subprocess.run(
             cmd,
-            env={"PGPASSWORD": PG_USER, **{k: v for k, v in __import__("os").environ.items()}},
+            # PGPASSWORD 환경 변수를 전달하여 비밀번호 프롬프트 방지
+            env=dict(os.environ, PGPASSWORD=PG_PASSWORD),
             capture_output=True,
             text=True,
         )
