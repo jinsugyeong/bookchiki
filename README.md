@@ -2,24 +2,33 @@
 
 사용자의 독서 기록과 평점을 기반으로 AI가 책을 추천해주는 개인화 독서 서비스.
 
+![home](./frontend/public/captures/home.png)
+
+2026-03-12 첫번째 배포 [확인하기](https://bookchiki.vercel.app)
+
+
+<br>
+
 - 📖 **독서 기록 관리** — 읽은 책 등록, 별점, 메모/하이라이트
 - 🎯 **AI 책 추천** — 시스템1: 기록 기반 개인화 추천 / 시스템2: 취향 프로필 + 자연어 질문 기반 맞춤 추천
 - 📊 **독서 통계** — 월별 독서량, 장르 분포, 평균 평점
 - 📥 **데이터 임포트** — 북적북적 등 외부 앱 CSV 가져오기
 - 🖼 **북스타그램 이미지 생성** — 책의 분위기에 맞는 AI 배경 생성(DALL-E 3) + 하이라이트 문구 편집 및 카드 이미지 저장
 
+
+
 ## 기술 스택
 
 | 영역 | 기술 |
 |------|------|
-| 백엔드 | FastAPI (Python 3.12) |
+| 백엔드 | FastAPI (Python 3.11) |
 | 메인 DB | PostgreSQL 16 |
 | 검색/벡터 | OpenSearch 2.17 (하이브리드 BM25 + KNN) |
 | AI/ML | OpenAI API (GPT-4o-mini, text-embedding-3-small) |
 | 도서 데이터 | 알라딘 TTB API (실시간 보완) |
 | 배치 스케줄링 | APScheduler (자정 배치) |
-| 프론트엔드 | Next.js 15 + Tailwind v4 + TanStack Query v5 (완료) |
-| 배포 | Docker Compose (개발) / AWS EC2 + RDS + OpenSearch / Vercel (프론트) |
+| 프론트엔드 | Next.js 15 + Tailwind v4 + TanStack Query v5 |
+| 배포 | Docker Compose (개발) / AWS EC2(OpenSearch) + RDS / Vercel (프론트) |
 | 인증 | Google OAuth 2.0 + JWT |
 
 ## 추천 시스템
@@ -44,7 +53,7 @@ false           true
                 ├─ CF 앙상블 스코어링 (ALS 모델 있을 때만)
                 │   └─ 최종 점수 = α × OpenSearch + (1-α) × CF
                 │      (α는 서재 책 수에 따라 동적 조절)
-                ├─ 다양성 보장 + score 정규화
+                ├─ 다양성 보장 + score 정규화 (0.8 ~ 1.0)
                 ├─ 최종 N권 DB 저장
                 ├─ user_preference_profiles 갱신 (is_dirty=false)
                 └─ 추천 이유 생성 (GPT-4o-mini)
@@ -111,7 +120,7 @@ docker compose exec -w /project backend python scripts/train_cf.py
 
 **인증 방식:**
 - Google OAuth 2.0 기반 로그인
-- JWT Access Token (기본 60분 만료) + Refresh Token (기본 7일 만료)
+- JWT Access Token (기본 15분 만료) + Refresh Token (기본 7일 만료)
 - Refresh Token은 DB 저장 및 로그아웃 시 자동 폐기
 - 개발 중에도 실제 Google OAuth 요구 (우회 없음)
 
@@ -123,12 +132,14 @@ docker compose exec -w /project backend python scripts/train_cf.py
 
 | 엔드포인트 | 설명 |
 |-----------|------|
-| `POST /books/search` | 알라딘 도서 검색 |
-| `GET /my-books` | 내 서재 조회 |
-| `POST /my-books/{book_id}` | 평점/상태 업데이트 |
-| `GET /recommendations` | 개인화 추천 (캐시 히트 시 ~10ms, 알라딘 보완 포함) |
-| `POST /recommendations/ask` | 질문 기반 맞춤 추천 (서재 추가 가능) |
-| `POST /recommendations/dismiss/{book_id}` | 추천 책 영구 비추천 |
+| `POST /auth/google` | Google OAuth 로그인 |
+| `PATCH /auth/me` | 프로필 업데이트 (인스타그램 계정 등) |
+| `DELETE /auth/me` | 회원 탈퇴 (익명화 처리) |
+| `GET /books/search/aladin` | 알라딘 도서 실시간 검색 |
+| `GET /my-books` | 내 서재 목록 및 독서 통계 |
+| `GET /recommendations` | 추천 시스템1: 개인화 추천 (opensearch 하이브리드 서치 기반 CBF +CF)) |
+| `POST /recommendations/ask` | 추천 시스템2 (RAG): 질문 기반 맞춤 추천 (Tavily 검색 보완) |
+| `POST /recommendations/dismiss/{book_id}` | 추천 도서 영구 제외 |
 | `GET /recommendations/profile` | 취향 프로필 조회 |
 | `POST /recommendations/refresh` | 강제 추천 재생성 |
 | `POST /imports/csv` | CSV 임포트 |
@@ -164,23 +175,23 @@ bookchiki/
 ├── frontend/               
 │   ├── app/                 # Next.js App Router
 │   │   ├── page.tsx         # 홈 페이지
-│   │   ├── (auth)/          # 로그인 페이지
+│   │   ├── login/           # 로그인 페이지
 │   │   ├── library/         # 내 서재 + 책 검색
 │   │   ├── recommendations/ # 추천
+│   │   ├── create-image/    # 북스타그램 이미지 생성
 │   │   └── mypage/          # 마이페이지
 │   ├── components/          # UI 컴포넌트
 │   ├── hooks/               # React 훅
-│   ├── services/            # API 클라이언트
+│   ├── lib/                 # API 클라이언트
 │   ├── tailwind.config.ts   # Tailwind v4
 │   ├── package.json
 │   └── .env.local
 │
 ├── scripts/               # 헬퍼 스크립트 (CF 학습, Data Backup 등)
 ├── docs/
-│   ├── plan.md            # 개발 로드맵 (Phase 1~6)
-│   ├── INDEX.md           # 문서 인덱스
 │   ├── API.md             # API 엔드포인트
 │   ├── ENV.md             # 환경변수
+│   ├── INDEX.md           # 문서 인덱스
 │   └── CONTRIBUTING.md    # 개발 가이드
 │
 ├── docker-compose.yml
@@ -197,8 +208,8 @@ bookchiki/
 | `OPENAI_API_KEY` | ✅ | GPT-4o-mini + 임베딩 |
 | `ALADIN_API_KEY` | ✅ | 도서 검색/검증 |
 | `JWT_SECRET_KEY` | ✅ | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `GOOGLE_CLIENT_ID/SECRET` | ✅ | OAuth (프로덕션만 필수) |
 | `OPENSEARCH_HOST` |  | 기본값 `opensearch` (Docker) |
-| `GOOGLE_CLIENT_ID/SECRET` |  | OAuth (프로덕션만 필수) |
 | `FRONTEND_URL` |  | CORS 허용 URL |
 
 ## 주의사항
