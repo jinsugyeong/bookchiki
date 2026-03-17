@@ -1,0 +1,71 @@
+name: Deploy to EC2
+
+# 1. 언제 이 액션을 실행할 것인가?
+on:
+  push:
+    branches:
+      - main
+    # 백엔드나 인프라 관련 파일이 수정될 때만 배포 실행 (프론트/docs 수정 시 무시)
+    paths:
+      - 'backend/**'
+      - 'opensearch/**'
+      - 'scripts/**'
+      - 'docker-compose.prod.yml'
+      - '.github/workflows/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 2. 깃허브 레포지토리 코드 가져오기
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 3. 도커 빌드 환경 세팅
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 4. 도커 허브 로그인
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 5. 백엔드 이미지 빌드 및 푸시
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend # backend 폴더 안의 내용만 컨텍스트로 사용
+          file: ./backend/Dockerfile.prod  #배포용 도커파일 사용
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/bookchiki-backend:latest 
+
+      # 6. EC2 서버에 접속해서 배포 스크립트 실행
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # EC2 내 프로젝트 폴더로 이동
+            cd ~/bookchiki
+            
+            # Sparse Checkout 설정 (frontend, docs 등 무거운 폴더 제외)
+            git sparse-checkout disable
+            git sparse-checkout init --no-cone
+            git sparse-checkout set backend/ opensearch/ scripts/ docker-compose.prod.yml
+            
+            # 최신 코드 땡겨오기 (지정한 폴더와 파일들만 받아짐)
+            git pull origin main
+            
+            # 백엔드 최신 도커 이미지 다운로드
+            sudo docker compose -f docker-compose.prod.yml pull backend
+            
+            # 컨테이너 재시작 (변경된 이미지만 새로 띄워짐)
+            sudo docker compose -f docker-compose.prod.yml up -d
+            
+            # 용량 확보를 위해 사용하지 않는 이전 도커 이미지 삭제
+            sudo docker image prune -f
